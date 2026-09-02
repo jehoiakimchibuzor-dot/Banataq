@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "703260191557",
+    "project_id": "banataq-80a9b",
+    "storage_bucket": "banataq-80a9b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:703260191557:android:35b3fbc38d8ce09de82c2c",
+        "android_client_info": {
+          "package_name": "com.banataq.banataq"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "703260191557-86pi8jcinfl2ju1439f0blubcocg85uo.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCPMSaSRSCcCbfURT7FlC17zB1nkDMyV1E"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "703260191557-86pi8jcinfl2ju1439f0blubcocg85uo.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
