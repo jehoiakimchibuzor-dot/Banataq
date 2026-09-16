@@ -9,6 +9,7 @@ final class FirestoreConstants {
   static const String settings = 'settings';
   static const String feedback = 'feedback';
   static const String usageStats = 'usage_stats';
+  static const String workspaces = 'workspaces';
 
   static const String uid = 'uid';
   static const String userId = 'userId';

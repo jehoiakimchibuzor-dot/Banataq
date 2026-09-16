@@ -42,6 +42,36 @@ class WorkspaceMemory {
       updatedAt: updatedAt ?? this.updatedAt,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'content': content,
+        'category': category.name,
+        'source': source,
+        'confidence': confidence.name,
+        'pinned': pinned,
+        'updatedAt': updatedAt?.toIso8601String(),
+      };
+
+  factory WorkspaceMemory.fromJson(Map<String, dynamic> json) {
+    return WorkspaceMemory(
+      id: json['id'] as String? ?? '',
+      title: json['title'] as String? ?? '',
+      content: json['content'] as String? ?? '',
+      category: MemoryCategory.values.firstWhere(
+        (e) => e.name == json['category'],
+        orElse: () => MemoryCategory.context,
+      ),
+      source: json['source'] as String?,
+      confidence: MemoryConfidence.values.firstWhere(
+        (e) => e.name == json['confidence'],
+        orElse: () => MemoryConfidence.confirmed,
+      ),
+      pinned: json['pinned'] as bool? ?? false,
+      updatedAt: json['updatedAt'] != null ? DateTime.tryParse(json['updatedAt'] as String) : null,
+    );
+  }
 }
 
 /// Memory categories used for filtering.

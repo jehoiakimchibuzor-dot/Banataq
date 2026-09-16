@@ -13,6 +13,16 @@ class WorkspaceSubtask {
   WorkspaceSubtask copyWith({bool? done}) {
     return WorkspaceSubtask(id: id, title: title, done: done ?? this.done);
   }
+
+  Map<String, dynamic> toJson() => {'id': id, 'title': title, 'done': done};
+
+  factory WorkspaceSubtask.fromJson(Map<String, dynamic> json) {
+    return WorkspaceSubtask(
+      id: json['id'] as String? ?? '',
+      title: json['title'] as String? ?? '',
+      done: json['done'] as bool? ?? false,
+    );
+  }
 }
 
 /// Where a task came from.
@@ -20,19 +30,19 @@ enum TaskSource { manual, ai }
 
 extension TaskSourceX on TaskSource {
   String get label => switch (this) {
-        TaskSource.manual => 'Manual',
-        TaskSource.ai => 'AI suggested',
-      };
+    TaskSource.manual => 'Manual',
+    TaskSource.ai => 'AI suggested',
+  };
 }
 
 enum TaskPriority { low, medium, high }
 
 extension TaskPriorityX on TaskPriority {
   String get label => switch (this) {
-        TaskPriority.low => 'Low',
-        TaskPriority.medium => 'Medium',
-        TaskPriority.high => 'High',
-      };
+    TaskPriority.low => 'Low',
+    TaskPriority.medium => 'Medium',
+    TaskPriority.high => 'High',
+  };
 }
 
 /// Scheduling bucket for open tasks, derived from [WorkspaceTask.dueDate].
@@ -40,11 +50,11 @@ enum TaskDueGroup { overdue, today, upcoming, none }
 
 extension TaskDueGroupX on TaskDueGroup {
   String get label => switch (this) {
-        TaskDueGroup.overdue => 'Overdue',
-        TaskDueGroup.today => 'Today',
-        TaskDueGroup.upcoming => 'Upcoming',
-        TaskDueGroup.none => 'No date',
-      };
+    TaskDueGroup.overdue => 'Overdue',
+    TaskDueGroup.today => 'Today',
+    TaskDueGroup.upcoming => 'Upcoming',
+    TaskDueGroup.none => 'No date',
+  };
 }
 
 /// A single task inside a workspace.
@@ -122,6 +132,7 @@ class WorkspaceTask {
     TaskSource? source,
     List<WorkspaceSubtask>? subtasks,
     bool? archived,
+    DateTime? createdAt,
   }) {
     return WorkspaceTask(
       id: id,
@@ -131,12 +142,66 @@ class WorkspaceTask {
       dueLabel: dueLabel ?? this.dueLabel,
       dueDate: dueDate ?? this.dueDate,
       contextLabel: contextLabel ?? this.contextLabel,
-      createdAt: createdAt,
+      createdAt: createdAt ?? this.createdAt,
       source: source ?? this.source,
       subtasks: subtasks ?? this.subtasks,
       linkedSessionIds: linkedSessionIds,
       linkedFileIds: linkedFileIds,
       archived: archived ?? this.archived,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'title': title,
+    'done': done,
+    'priority': priority.name,
+    'dueLabel': dueLabel,
+    'dueDate': dueDate?.toIso8601String(),
+    'contextLabel': contextLabel,
+    'createdAt': createdAt?.toIso8601String(),
+    'source': source.name,
+    'subtasks': subtasks.map((s) => s.toJson()).toList(),
+    'linkedSessionIds': linkedSessionIds,
+    'linkedFileIds': linkedFileIds,
+    'archived': archived,
+  };
+
+  factory WorkspaceTask.fromJson(Map<String, dynamic> json) {
+    return WorkspaceTask(
+      id: json['id'] as String? ?? '',
+      title: json['title'] as String? ?? '',
+      done: json['done'] as bool? ?? false,
+      priority: TaskPriority.values.firstWhere(
+        (e) => e.name == json['priority'],
+        orElse: () => TaskPriority.medium,
+      ),
+      dueLabel: json['dueLabel'] as String?,
+      dueDate: json['dueDate'] != null
+          ? DateTime.tryParse(json['dueDate'] as String)
+          : null,
+      contextLabel: json['contextLabel'] as String?,
+      createdAt: json['createdAt'] != null
+          ? DateTime.tryParse(json['createdAt'] as String)
+          : null,
+      source: TaskSource.values.firstWhere(
+        (e) => e.name == json['source'],
+        orElse: () => TaskSource.manual,
+      ),
+      subtasks:
+          (json['subtasks'] as List?)
+              ?.map((e) => WorkspaceSubtask.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          const [],
+      linkedSessionIds:
+          (json['linkedSessionIds'] as List?)
+              ?.map((e) => e as String)
+              .toList() ??
+          const [],
+      linkedFileIds:
+          (json['linkedFileIds'] as List?)?.map((e) => e as String).toList() ??
+          const [],
+      archived: json['archived'] as bool? ?? false,
     );
   }
 

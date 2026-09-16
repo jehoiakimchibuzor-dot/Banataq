@@ -11,11 +11,12 @@ import '../core/constants/app_keys.dart';
 enum AiProviderType { local, ollama, openai, gemini, groq, openRouter }
 
 class AssistantService {
+  AssistantService({StorageService? storage}) : _storage = storage ?? StorageService();
   AiProviderType _providerType = AiProviderType.ollama;
   AiProvider? _remoteProvider;
   String _apiKey = '';
   final _local = LocalAssistant();
-  final _storage = StorageService();
+  final StorageService _storage;
   final _proxy = ChatProxy();
   String _ollamaBaseUrl = '';
   String _ollamaModel = '';

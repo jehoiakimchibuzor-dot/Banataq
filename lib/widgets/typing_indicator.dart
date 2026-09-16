@@ -8,26 +8,53 @@ class TypingIndicator extends StatefulWidget {
   State<TypingIndicator> createState() => _TypingIndicatorState();
 }
 
-class _TypingIndicatorState extends State<TypingIndicator> with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 1600))..repeat(reverse: true);
+class _TypingIndicatorState extends State<TypingIndicator>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1600),
+  )..repeat(reverse: true);
   @override
-  void dispose() { _c.dispose(); super.dispose(); }
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final reduce = MediaQuery.of(context).disableAnimations;
+    final scheme = Theme.of(context).colorScheme;
     return Align(
       alignment: Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.only(top: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(18),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(2, 6, 12, 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AnimatedBuilder(
+              animation: _c,
+              // ignore: unnecessary_underscores
+              builder: (_, __) => BanataqMark(
+                size: 22,
+                glow: reduce ? 0 : 0.30 + 0.30 * _c.value,
+                progress: 1,
+                reducedMotion: reduce,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              'Thinking…',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                letterSpacing: -0.1,
+                color: scheme.onSurfaceVariant,
+                height: 1.2,
+              ),
+            ),
+          ],
         ),
-        child: AnimatedBuilder(animation: _c, builder: (_, __) => BanataqMark(size: 28, glow: reduce ? 0 : 0.35 + 0.35 * _c.value, progress: 1, reducedMotion: reduce)),
       ),
     );
   }
 }
-
-

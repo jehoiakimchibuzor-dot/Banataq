@@ -5,6 +5,7 @@ import '../models/conversation.dart';
 import '../models/chat_message.dart';
 import '../models/onboarding_preferences.dart';
 import 'assistant_service.dart';
+import 'secure_key_store.dart';
 
 class StorageService {
   static const _profileKey = 'user_profile';
@@ -96,28 +97,142 @@ class StorageService {
     );
   }
 
+  // --- helpers for SecureKeyStore migration ---
+  static SecureKeyStore? _testSecureStore;
+  // Visible for testing — inject a fake to avoid platform channel.
+  static void setTestSecureStore(SecureKeyStore? store) => _testSecureStore = store;
+
+  SecureKeyStore get _secure => _testSecureStore ?? SecureKeyStore();
+
+  Future<String?> _readSecureForProvider(AiProviderType type) async {
+    try {
+      switch (type) {
+        case AiProviderType.gemini:
+          return await _secure.readGemini().timeout(const Duration(milliseconds: 800), onTimeout: () => null);
+        case AiProviderType.groq:
+          return await _secure.readGroq().timeout(const Duration(milliseconds: 800), onTimeout: () => null);
+        case AiProviderType.openRouter:
+          return await _secure.readOpenRouter().timeout(const Duration(milliseconds: 800), onTimeout: () => null);
+        case AiProviderType.openai:
+          return await _secure.readOpenAI().timeout(const Duration(milliseconds: 800), onTimeout: () => null);
+        default:
+          return null;
+      }
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _writeSecureForProvider(AiProviderType type, String key) async {
+    try {
+      switch (type) {
+        case AiProviderType.gemini:
+          return await _secure.writeGemini(key).timeout(const Duration(milliseconds: 800), onTimeout: () {});
+        case AiProviderType.groq:
+          return await _secure.writeGroq(key).timeout(const Duration(milliseconds: 800), onTimeout: () {});
+        case AiProviderType.openRouter:
+          return await _secure.writeOpenRouter(key).timeout(const Duration(milliseconds: 800), onTimeout: () {});
+        case AiProviderType.openai:
+          return await _secure.writeOpenAI(key).timeout(const Duration(milliseconds: 800), onTimeout: () {});
+        default:
+          return;
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _removeLegacyApiKey(
+    SharedPreferences prefs,
+    AiProviderType provider,
+  ) async {
+    final raw = prefs.getString(_aiConfigKey);
+    if (raw == null) return;
+    try {
+      jsonDecode(raw) as Map<String, dynamic>;
+      // Keep provider, drop apiKey
+      await prefs.setString(
+        _aiConfigKey,
+        jsonEncode({'provider': provider.name}),
+      );
+    } catch (_) {
+      await prefs.setString(
+        _aiConfigKey,
+        jsonEncode({'provider': provider.name}),
+      );
+    }
+  }
+
   Future<Map<String, dynamic>> loadAiConfig() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_aiConfigKey);
-    if (raw == null) {
-      return {'provider': AiProviderType.ollama, 'apiKey': ''};
+    AiProviderType provider = AiProviderType.ollama;
+    String legacyApiKey = '';
+    if (raw != null) {
+      try {
+        final data = jsonDecode(raw) as Map<String, dynamic>;
+        provider = AiProviderType.values.firstWhere(
+          (e) => e.name == data['provider'],
+          orElse: () => AiProviderType.ollama,
+        );
+        legacyApiKey = data['apiKey'] as String? ?? '';
+      } catch (_) {
+        // corrupted, treat as ollama with no key
+      }
     }
-    final data = jsonDecode(raw) as Map<String, dynamic>;
-    return {
-      'provider': AiProviderType.values.firstWhere(
-        (e) => e.name == data['provider'],
-        orElse: () => AiProviderType.ollama,
-      ),
-      'apiKey': data['apiKey'] as String? ?? '',
-    };
+
+    // 1. Secure already contains key → use it, clean legacy if needed (idempotent)
+    try {
+      final secureKey = await _readSecureForProvider(provider);
+      if (secureKey != null && secureKey.trim().isNotEmpty) {
+        if (legacyApiKey.isNotEmpty) {
+          await _removeLegacyApiKey(prefs, provider);
+        }
+        return {'provider': provider, 'apiKey': secureKey};
+      }
+    } catch (_) {
+      // secure read failed — fall through to legacy
+    }
+
+    // 2. No secure key, but legacy has one → migrate
+    if (legacyApiKey.trim().isNotEmpty) {
+      try {
+        await _writeSecureForProvider(provider, legacyApiKey.trim());
+        final verify = await _readSecureForProvider(provider);
+        if (verify == legacyApiKey.trim()) {
+          await _removeLegacyApiKey(prefs, provider);
+          return {'provider': provider, 'apiKey': verify ?? ''};
+        }
+      } catch (_) {
+        // migration failed — return legacy without destroying
+        return {'provider': provider, 'apiKey': legacyApiKey};
+      }
+      // verify mismatch — return legacy to avoid data loss
+      return {'provider': provider, 'apiKey': legacyApiKey};
+    }
+
+    // 3. No credential configured
+    return {'provider': provider, 'apiKey': ''};
   }
 
   Future<void> saveAiConfig(AiProviderType provider, String apiKey) async {
     final prefs = await SharedPreferences.getInstance();
+    final trimmed = apiKey.trim();
+    // Non-secret provider stays in SharedPreferences
     await prefs.setString(
       _aiConfigKey,
-      jsonEncode({'provider': provider.name, 'apiKey': apiKey}),
+      jsonEncode({'provider': provider.name}),
     );
+    // Secret goes to SecureKeyStore (or cleared)
+    if (trimmed.isEmpty) {
+      // Clear secure for this provider (best-effort)
+      try {
+        if (provider == AiProviderType.gemini) await _secure.delete('gemini_api_key').timeout(const Duration(milliseconds: 800), onTimeout: () {});
+        if (provider == AiProviderType.groq) await _secure.delete('groq_api_key').timeout(const Duration(milliseconds: 800), onTimeout: () {});
+        if (provider == AiProviderType.openRouter) await _secure.delete('openrouter_api_key').timeout(const Duration(milliseconds: 800), onTimeout: () {});
+        if (provider == AiProviderType.openai) await _secure.delete('openai_api_key').timeout(const Duration(milliseconds: 800), onTimeout: () {});
+      } catch (_) {}
+      return;
+    }
+    await _writeSecureForProvider(provider, trimmed);
   }
 
   Future<String> loadOllamaUrl() async {

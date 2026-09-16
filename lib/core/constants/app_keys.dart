@@ -2,18 +2,34 @@
 /// which holds keys in Secret Manager. For local dev, pass via --dart-define.
 /// Stored user BYOK (if any) lives in flutter_secure_storage, not SharedPreferences.
 class AppKeys {
-  static const String geminiApiKey = String.fromEnvironment('GEMINI_KEY', defaultValue: '');
-  static const String groqApiKey = String.fromEnvironment('GROQ_KEY', defaultValue: '');
-  static const String openRouterApiKey = String.fromEnvironment('OPENROUTER_KEY', defaultValue: '');
-  static const String openaiApiKey = String.fromEnvironment('OPENAI_KEY', defaultValue: '');
+  static const String geminiApiKey = String.fromEnvironment(
+    'GEMINI_KEY',
+    defaultValue: '',
+  );
+  static const String groqApiKey = String.fromEnvironment(
+    'GROQ_KEY',
+    defaultValue: '',
+  );
+  static const String openRouterApiKey = String.fromEnvironment(
+    'OPENROUTER_KEY',
+    defaultValue: '',
+  );
+  static const String openaiApiKey = String.fromEnvironment(
+    'OPENAI_KEY',
+    defaultValue: '',
+  );
 
   static bool get hasEmbeddedGeminiKey => geminiApiKey.trim().isNotEmpty;
   static bool get hasEmbeddedGroqKey => groqApiKey.trim().isNotEmpty;
-  static bool get hasEmbeddedOpenRouterKey => openRouterApiKey.trim().isNotEmpty;
+  static bool get hasEmbeddedOpenRouterKey =>
+      openRouterApiKey.trim().isNotEmpty;
   static bool get hasEmbeddedOpenaiKey => openaiApiKey.trim().isNotEmpty;
 
-  /// Proxy base — set via --dart-define=PROXY_URL=https://<region>-banataq-80a9b.cloudfunctions.net
-  static const String proxyUrl = String.fromEnvironment('PROXY_URL', defaultValue: '');
+  /// Proxy base — set via --dart-define=`PROXY_URL`=https://`<region>`-banataq-80a9b.cloudfunctions.net
+  static const String proxyUrl = String.fromEnvironment(
+    'PROXY_URL',
+    defaultValue: '',
+  );
   static bool get useProxy => proxyUrl.trim().isNotEmpty;
 }
 
@@ -67,4 +83,8 @@ const List<String> kHfModels = [
 ];
 
 /// Unified free catalog for UI (proxy picks cheapest)
-const List<String> kAllFreeModels = [...kGeminiModels, ...kGroqModels, ...kOpenRouterModels];
+const List<String> kAllFreeModels = [
+  ...kGeminiModels,
+  ...kGroqModels,
+  ...kOpenRouterModels,
+];

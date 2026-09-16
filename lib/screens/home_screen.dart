@@ -14,6 +14,7 @@ import '../features/settings/presentation/screens/settings_screen.dart';
 import '../features/profile/presentation/screens/profile_screen.dart';
 import '../features/workspace/presentation/workspace_screen.dart';
 import '../features/auth/presentation/bloc/auth_bloc.dart';
+import '../features/auth/presentation/bloc/auth_state.dart';
 import '../features/sync/data/sync_service.dart';
 import '../features/sync/domain/sync_operation.dart';
 import '../core/di/injection_container.dart' as di;
@@ -41,7 +42,7 @@ class _BanataqHomeState extends State<BanataqHome> {
   final _controller = TextEditingController();
   final _scrollController = ScrollController();
   final _assistant = di.sl<AssistantService>();
-  final _storage = StorageService();
+  StorageService get _storage => di.sl<StorageService>();
   final _scaffoldKey = GlobalKey<ScaffoldState>();
 
   List<Conversation> _conversations = [];
@@ -315,10 +316,11 @@ class _BanataqHomeState extends State<BanataqHome> {
       // fire-and-forget upload to Firebase Storage for persistence
       unawaited(_uploadPending());
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Pick failed: $e')));
+      }
     }
   }
 
@@ -552,6 +554,36 @@ class _BanataqHomeState extends State<BanataqHome> {
     _persist();
   }
 
+  Future<void> _clearAllHistory() async {
+    _streamSub?.cancel();
+    _conversations = [];
+    final fresh = Conversation(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      title: '',
+      messages: [ChatMessage(fromUser: false, text: _welcomeMessage)],
+      createdAt: DateTime.now(),
+    );
+    _conversations = [fresh];
+    _currentId = fresh.id;
+    _messages = List.from(fresh.messages);
+    _streamingMessageIndex = null;
+    _pendingFiles.clear();
+    await _storage.saveConversations([], userId: _userId);
+    await _storage.saveConversations(_conversations, userId: _userId);
+    final uid = _userId;
+    if (uid != null) {
+      for (final c in List<Conversation>.from(_conversations)) {
+        await _syncService.syncConversation(
+          userId: uid,
+          conversationId: c.id,
+          data: c.toJson(),
+          type: SyncOperationType.update,
+        );
+      }
+    }
+    if (mounted) setState(() {});
+  }
+
   Future<void> _showModelSwitcher() async {
     await _assistant.loadConfig();
     if (!mounted) return;
@@ -620,7 +652,7 @@ class _BanataqHomeState extends State<BanataqHome> {
     return Scaffold(
       key: _scaffoldKey,
       drawer: _buildDrawer(context),
-      backgroundColor: const Color(0xFF070B14),
+      backgroundColor: scheme.surfaceContainerLowest,
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
@@ -772,16 +804,70 @@ class _BanataqHomeState extends State<BanataqHome> {
                   builder: (context, auth) {
                     final email = auth.user?.email ?? '';
                     final name = auth.user?.displayName ?? 'User';
-                    final initial = name.isNotEmpty ? name[0].toUpperCase() : 'B';
-                    return Row(children: [
-                      CircleAvatar(radius: 16, backgroundColor: Theme.of(context).colorScheme.primaryContainer, child: Text(initial, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: Theme.of(context).colorScheme.onPrimaryContainer))),
-                      const SizedBox(width: 10),
-                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text(name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700), maxLines: 1, overflow: TextOverflow.ellipsis),
-                        if (email.isNotEmpty) Text(email, style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant), maxLines: 1, overflow: TextOverflow.ellipsis),
-                      ])),
-                      IconButton(icon: const Icon(Icons.settings_outlined, size: 20), tooltip: 'Settings', onPressed: () { Navigator.of(context).pop(); Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen())); }),
-                    ]);
+                    final initial = name.isNotEmpty
+                        ? name[0].toUpperCase()
+                        : 'B';
+                    return Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 16,
+                          backgroundColor: Theme.of(
+                            context,
+                          ).colorScheme.primaryContainer,
+                          child: Text(
+                            initial,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 12,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onPrimaryContainer,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                name,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              if (email.isNotEmpty)
+                                Text(
+                                  email,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.settings_outlined, size: 20),
+                          tooltip: 'Settings',
+                          onPressed: () {
+                            Navigator.of(context).pop();
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const SettingsScreen(),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    );
                   },
                 ),
               ),
@@ -829,11 +915,35 @@ class _BanataqHomeState extends State<BanataqHome> {
                 },
               ),
               ListTile(
-                leading: Icon(Icons.delete_outline_rounded, color: Theme.of(context).colorScheme.error),
-                title: Text('Clear all history', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                leading: Icon(
+                  Icons.delete_outline_rounded,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+                title: Text(
+                  'Clear all history',
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
                 onTap: () async {
                   Navigator.of(context).pop();
-                  final ok = await showDialog<bool>(context: context, builder: (c) => AlertDialog(title: const Text('Clear all chats?'), content: const Text('This will delete all conversations. Like GPT, this cannot be undone.'), actions: [TextButton(onPressed: () => Navigator.pop(c,false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(c,true), child: const Text('Clear'))]));
+                  final ok = await showDialog<bool>(
+                    context: context,
+                    builder: (c) => AlertDialog(
+                      title: const Text('Clear all chats?'),
+                      content: const Text(
+                        'This will delete all conversations. Like GPT, this cannot be undone.',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(c, false),
+                          child: const Text('Cancel'),
+                        ),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(c, true),
+                          child: const Text('Clear'),
+                        ),
+                      ],
+                    ),
+                  );
                   if (ok == true) await _clearAllHistory();
                 },
               ),
@@ -1075,64 +1185,66 @@ class _BanataqHomeState extends State<BanataqHome> {
                           children: [
                             Container(
                               width: 160,
-                              height: 72,
+                              height: 64,
                               decoration: BoxDecoration(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.surfaceContainerHigh,
-                                borderRadius: BorderRadius.circular(12),
+                                color: isDark
+                                    ? scheme.surfaceContainerHigh
+                                    : scheme.surface,
+                                borderRadius: BorderRadius.circular(
+                                  AppRadius.md,
+                                ),
                                 border: Border.all(
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.outlineVariant,
+                                  color: scheme.outlineVariant.withValues(
+                                    alpha: isDark ? 0.85 : 1.0,
+                                  ),
+                                  width: 1,
                                 ),
                               ),
-                              padding: const EdgeInsets.all(8),
+                              padding: const EdgeInsets.fromLTRB(8, 8, 28, 8),
                               child: Row(
                                 children: [
                                   Container(
-                                    width: 40,
-                                    height: 40,
+                                    width: 38,
+                                    height: 38,
                                     decoration: BoxDecoration(
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.primaryContainer,
+                                      color: scheme.surfaceContainerHighest,
                                       borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color: scheme.outlineVariant.withValues(
+                                          alpha: 0.6,
+                                        ),
+                                        width: 1,
+                                      ),
                                     ),
-                                    child:
-                                        f.path != null &&
-                                            (f.extension?.toLowerCase() ==
-                                                    'jpg' ||
-                                                f.extension?.toLowerCase() ==
-                                                    'png' ||
-                                                f.extension?.toLowerCase() ==
-                                                    'jpeg' ||
-                                                f.extension?.toLowerCase() ==
-                                                    'webp')
-                                        ? ClipRRect(
-                                            borderRadius: BorderRadius.circular(
-                                              8,
-                                            ),
-                                            child: Image.file(
-                                              File(f.path!),
-                                              fit: BoxFit.cover,
-                                              width: 40,
-                                              height: 40,
-                                              errorBuilder: (_, __, ___) =>
-                                                  const Icon(
-                                                    Icons.image_outlined,
-                                                    size: 20,
-                                                  ),
-                                            ),
-                                          )
+                                    clipBehavior: Clip.antiAlias,
+                                    child: _isImageFile(f)
+                                        ? (f.path != null
+                                              ? Image.file(
+                                                  File(f.path!),
+                                                  fit: BoxFit.cover,
+                                                  width: 38,
+                                                  height: 38,
+                                                  // ignore: unnecessary_underscores
+                                                  errorBuilder: (_, __, ___) =>
+                                                      Icon(
+                                                        Icons.image_outlined,
+                                                        size: 18,
+                                                        color: scheme
+                                                            .onSurfaceVariant,
+                                                      ),
+                                                )
+                                              : Icon(
+                                                  Icons.image_outlined,
+                                                  size: 18,
+                                                  color:
+                                                      scheme.onSurfaceVariant,
+                                                ))
                                         : Icon(
                                             f.extension?.toLowerCase() == 'pdf'
                                                 ? Icons.picture_as_pdf_outlined
                                                 : Icons.description_outlined,
-                                            size: 20,
-                                            color: Theme.of(
-                                              context,
-                                            ).colorScheme.onPrimaryContainer,
+                                            size: 18,
+                                            color: scheme.onSurfaceVariant,
                                           ),
                                   ),
                                   const SizedBox(width: 8),
@@ -1145,20 +1257,24 @@ class _BanataqHomeState extends State<BanataqHome> {
                                       children: [
                                         Text(
                                           f.name,
-                                          style: const TextStyle(
-                                            fontSize: 11,
+                                          style: TextStyle(
+                                            fontSize: 12,
                                             fontWeight: FontWeight.w600,
+                                            height: 1.2,
+                                            letterSpacing: -0.1,
+                                            color: scheme.onSurface,
                                           ),
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                         ),
+                                        const SizedBox(height: 2),
                                         Text(
-                                          '${(f.size / 1024).toStringAsFixed(0)} KB',
+                                          _fileSizeLabel(f.size),
                                           style: TextStyle(
-                                            fontSize: 10,
-                                            color: Theme.of(
-                                              context,
-                                            ).colorScheme.onSurfaceVariant,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w400,
+                                            color: scheme.onSurfaceVariant,
+                                            letterSpacing: -0.1,
                                           ),
                                         ),
                                       ],
@@ -1168,35 +1284,32 @@ class _BanataqHomeState extends State<BanataqHome> {
                               ),
                             ),
                             Positioned(
-                              top: -8,
-                              right: -8,
-                              child: GestureDetector(
-                                onTap: () =>
-                                    setState(() => _pendingFiles.remove(f)),
-                                child: Container(
-                                  width: 26,
-                                  height: 26,
-                                  decoration: BoxDecoration(
-                                    color: Colors.black,
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: Colors.white,
-                                      width: 2,
-                                    ),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withValues(
-                                          alpha: 0.25,
-                                        ),
-                                        blurRadius: 4,
-                                        offset: const Offset(0, 2),
+                              top: -6,
+                              right: -6,
+                              child: Material(
+                                color: scheme.surfaceContainerHighest,
+                                shape: const CircleBorder(),
+                                elevation: 0,
+                                child: InkWell(
+                                  customBorder: const CircleBorder(),
+                                  onTap: () =>
+                                      setState(() => _pendingFiles.remove(f)),
+                                  child: Container(
+                                    width: 22,
+                                    height: 22,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: scheme.surfaceContainerHighest,
+                                      border: Border.all(
+                                        color: scheme.outlineVariant,
+                                        width: 1,
                                       ),
-                                    ],
-                                  ),
-                                  child: const Icon(
-                                    Icons.close,
-                                    size: 14,
-                                    color: Colors.white,
+                                    ),
+                                    child: Icon(
+                                      Icons.close_rounded,
+                                      size: 12,
+                                      color: scheme.onSurfaceVariant,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -1225,34 +1338,55 @@ class _BanataqHomeState extends State<BanataqHome> {
     );
   }
 
+  bool _isImageFile(PlatformFile f) {
+    final ext = f.extension?.toLowerCase();
+    return ext == 'jpg' || ext == 'jpeg' || ext == 'png' || ext == 'webp';
+  }
+
+  String _fileSizeLabel(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
   Widget _messageBubble(ChatMessage msg, ThemeData theme) {
     final scheme = theme.colorScheme;
-    final color = msg.fromUser ? scheme.primary : scheme.surfaceContainerHigh;
+    // Assistant — premium workspace content, no enclosing bubble
+    if (!msg.fromUser) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 680),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(2, 6, 12, 2),
+            child: MarkdownMessage(text: msg.text),
+          ),
+        ),
+      );
+    }
+    // User — compact confident pill, accent only for user
     return Align(
-      alignment: msg.fromUser ? Alignment.centerRight : Alignment.centerLeft,
+      alignment: Alignment.centerRight,
       child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: msg.fromUser ? 480 : 680),
+        constraints: const BoxConstraints(maxWidth: 460),
         child: Container(
-          padding: const EdgeInsets.all(15),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.only(
-              topLeft: const Radius.circular(20),
-              topRight: const Radius.circular(20),
-              bottomLeft: Radius.circular(msg.fromUser ? 20 : 6),
-              bottomRight: Radius.circular(msg.fromUser ? 6 : 20),
+            color: scheme.primary,
+            borderRadius: BorderRadius.circular(
+              AppRadius.lg,
+            ).copyWith(bottomRight: const Radius.circular(6)),
+          ),
+          child: SelectableText(
+            msg.text,
+            style: TextStyle(
+              color: scheme.onPrimary,
+              fontSize: 14,
+              height: 1.45,
+              fontWeight: FontWeight.w400,
+              letterSpacing: -0.1,
             ),
           ),
-          child: msg.fromUser
-              ? SelectableText(
-                  msg.text,
-                  style: TextStyle(
-                    color: scheme.onPrimary,
-                    fontSize: 14,
-                    height: 1.5,
-                  ),
-                )
-              : MarkdownMessage(text: msg.text),
         ),
       ),
     );
@@ -1592,59 +1726,189 @@ class _Composer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return TextField(
-      controller: controller,
-      minLines: 1,
-      maxLines: 4,
-      textInputAction: TextInputAction.send,
-      onSubmitted: (_) => isStreaming ? onStop() : onSend(),
-      decoration: InputDecoration(
-        hintText: isStreaming
-            ? 'Banataq is replying...'
-            : 'Ask Banataq anything...',
-        filled: true,
-        fillColor: scheme.surfaceContainerHigh,
-        prefixIcon: IconButton(
-          onPressed: onSwitchModel,
-          tooltip: 'Switch model',
-          icon: const Text(
-            '+',
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
-          ),
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final hasText = controller.text.trim().isNotEmpty || hasPendingFiles;
+    final canSend = hasText && !isStreaming;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? scheme.surfaceContainerHigh : scheme.surface,
+        borderRadius: BorderRadius.circular(AppRadius.xl),
+        border: Border.all(
+          color: scheme.outlineVariant.withValues(alpha: isDark ? 0.85 : 1.0),
+          width: 1,
         ),
-        suffixIcon: Padding(
-          padding: const EdgeInsets.only(right: 6),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (onPickFiles != null)
-                IconButton(
-                  onPressed: onPickFiles,
-                  tooltip: 'Attach file',
-                  icon: const Icon(Icons.attach_file_rounded),
+      ),
+      padding: const EdgeInsets.fromLTRB(6, 6, 6, 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          // Attach — native professional control
+          if (onPickFiles != null)
+            _ComposerIconButton(
+              icon: Icons.attach_file_rounded,
+              tooltip: 'Attach file',
+              onPressed: onPickFiles!,
+              scheme: scheme,
+            ),
+          // Model switcher — "+" keeps existing behavior, now subtle
+          _ComposerIconButton(
+            icon: Icons.add_rounded,
+            tooltip: 'Switch model',
+            onPressed: onSwitchModel,
+            scheme: scheme,
+          ),
+          const SizedBox(width: 2),
+          Expanded(
+            child: TextField(
+              controller: controller,
+              minLines: 1,
+              maxLines: 5,
+              textInputAction: TextInputAction.send,
+              onSubmitted: (_) =>
+                  isStreaming ? onStop() : (canSend ? onSend() : null),
+              style: TextStyle(
+                fontSize: 14.5,
+                height: 1.5,
+                fontWeight: FontWeight.w400,
+                color: scheme.onSurface,
+                letterSpacing: -0.1,
+              ),
+              decoration: InputDecoration(
+                hintText: isStreaming
+                    ? 'Banataq is replying…'
+                    : 'Ask Banataq anything…',
+                hintStyle: TextStyle(
+                  fontSize: 14.5,
+                  height: 1.5,
+                  fontWeight: FontWeight.w400,
+                  color: scheme.onSurfaceVariant.withValues(alpha: 0.62),
+                  letterSpacing: -0.1,
                 ),
-              isStreaming
-                  ? IconButton.filled(
-                      onPressed: onStop,
-                      icon: const Icon(Icons.stop_rounded),
-                    )
-                  : IconButton.filled(
-                      onPressed:
-                          (controller.text.trim().isEmpty && !hasPendingFiles)
-                          ? null
-                          : onSend,
-                      icon: const Icon(Icons.arrow_upward_rounded),
-                    ),
-            ],
+                isDense: true,
+                filled: false,
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 6,
+                  vertical: 10,
+                ),
+              ),
+              cursorColor: scheme.primary,
+            ),
+          ),
+          const SizedBox(width: 6),
+          // Send / Stop — accent only here
+          _ComposerSendButton(
+            isStreaming: isStreaming,
+            canSend: canSend,
+            onSend: onSend,
+            onStop: onStop,
+            scheme: scheme,
+            isDark: isDark,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ComposerIconButton extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onPressed;
+  final ColorScheme scheme;
+  const _ComposerIconButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+    required this.scheme,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(AppRadius.pill),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+        onTap: onPressed,
+        child: SizedBox(
+          width: 36,
+          height: 36,
+          child: Icon(icon, size: 19, color: scheme.onSurfaceVariant),
+        ),
+      ),
+    );
+  }
+}
+
+class _ComposerSendButton extends StatelessWidget {
+  final bool isStreaming;
+  final bool canSend;
+  final VoidCallback onSend;
+  final VoidCallback onStop;
+  final ColorScheme scheme;
+  final bool isDark;
+  const _ComposerSendButton({
+    required this.isStreaming,
+    required this.canSend,
+    required this.onSend,
+    required this.onStop,
+    required this.scheme,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (isStreaming) {
+      return Material(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(AppRadius.pill),
+          onTap: onStop,
+          child: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(AppRadius.pill),
+              border: Border.all(color: scheme.outlineVariant, width: 1),
+            ),
+            child: Icon(
+              Icons.stop_rounded,
+              size: 18,
+              color: scheme.onSurfaceVariant,
+            ),
           ),
         ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(22),
-          borderSide: BorderSide(color: scheme.outlineVariant),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(22),
-          borderSide: BorderSide(color: scheme.outlineVariant),
+      );
+    }
+    final enabled = canSend;
+    return Material(
+      color: enabled ? scheme.primary : scheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(AppRadius.pill),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+        onTap: enabled ? onSend : null,
+        child: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadius.pill),
+            border: Border.all(
+              color: enabled ? Colors.transparent : scheme.outlineVariant,
+              width: 1,
+            ),
+          ),
+          child: Icon(
+            Icons.arrow_upward_rounded,
+            size: 18,
+            color: enabled
+                ? scheme.onPrimary
+                : scheme.onSurfaceVariant.withValues(alpha: 0.45),
+          ),
         ),
       ),
     );

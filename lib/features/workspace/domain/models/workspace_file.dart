@@ -55,4 +55,35 @@ class WorkspaceFile {
       tags: tags ?? this.tags,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'type': type.name,
+        'meta': meta,
+        'summarized': summarized,
+        'summary': summary,
+        'createdAt': createdAt?.toIso8601String(),
+        'favourite': favourite,
+        'pinned': pinned,
+        'tags': tags,
+      };
+
+  factory WorkspaceFile.fromJson(Map<String, dynamic> json) {
+    return WorkspaceFile(
+      id: json['id'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      type: AppFileType.values.firstWhere(
+        (e) => e.name == json['type'],
+        orElse: () => AppFileType.unknown,
+      ),
+      meta: json['meta'] as String?,
+      summarized: json['summarized'] as bool? ?? false,
+      summary: json['summary'] as String?,
+      createdAt: json['createdAt'] != null ? DateTime.tryParse(json['createdAt'] as String) : null,
+      favourite: json['favourite'] as bool? ?? false,
+      pinned: json['pinned'] as bool? ?? false,
+      tags: (json['tags'] as List?)?.map((e) => e as String).toList() ?? const [],
+    );
+  }
 }

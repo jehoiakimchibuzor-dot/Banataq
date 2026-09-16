@@ -77,18 +77,13 @@ final class SyncEngine {
         final batch = await _queueManager.dequeue(batchSize: 5);
         if (batch.isEmpty) break;
 
-        final writeBatch = _firestore.batch();
         final opsToRetry = <SyncOperation>[];
 
         for (final operation in batch) {
-          final applied = await _applyOperation(operation);
+          final bool applied = await _applyOperation(operation);
           if (!applied) {
             opsToRetry.add(operation);
           }
-        }
-
-        if (opsToRetry.isEmpty) {
-          await writeBatch.commit();
         }
 
         for (final operation in batch) {
@@ -111,10 +106,20 @@ final class SyncEngine {
       _isProcessing = false;
       _emitMetrics();
 
-      final hasFailed = await _queueManager.getFailedOperations();
+      final List<SyncOperation> hasFailed = await _queueManager.getFailedOperations();
       if (hasFailed.isNotEmpty) {
         _scheduleRetry();
       }
+    }
+  }
+
+  /// Resets failed ops (retryCount < 5) to pending and re-processes.
+  Future<void> retryFailed() async {
+    await _queueManager.retryFailed();
+    _emitMetrics();
+    final bool connected = await connectivityService.isConnected;
+    if (connected) {
+      await processQueue();
     }
   }
 
@@ -122,28 +127,28 @@ final class SyncEngine {
     try {
       switch (operation.type) {
         case SyncOperationType.create:
-          final canCreate = await _conflictResolver.canCreate(
+          final bool canCreate = await _conflictResolver.canCreate(
             operation: operation,
             firestore: _firestore,
           );
           if (!canCreate) return true;
-          final docRef = _getDocumentRef(operation);
-          docRef.set(operation.data, SetOptions(merge: true));
+          final DocumentReference<Map<String, dynamic>> docRef = _getDocumentRef(operation);
+          await docRef.set(operation.data, SetOptions(merge: true));
           return true;
 
         case SyncOperationType.update:
-          final resolved = await _conflictResolver.resolve(
+          final Map<String, dynamic>? resolved = await _conflictResolver.resolve(
             operation: operation,
             firestore: _firestore,
           );
           if (resolved == null) return true;
-          final docRef = _getDocumentRef(operation);
-          docRef.set(resolved, SetOptions(merge: true));
+          final DocumentReference<Map<String, dynamic>> docRef = _getDocumentRef(operation);
+          await docRef.set(resolved, SetOptions(merge: true));
           return true;
 
         case SyncOperationType.delete:
-          final docRef = _getDocumentRef(operation);
-          docRef.delete();
+          final DocumentReference<Map<String, dynamic>> docRef = _getDocumentRef(operation);
+          await docRef.delete();
           return true;
       }
     } catch (e) {
@@ -168,7 +173,7 @@ final class SyncEngine {
     });
   }
 
-  DocumentReference _getDocumentRef(SyncOperation operation) {
+  DocumentReference<Map<String, dynamic>> _getDocumentRef(SyncOperation operation) {
     if (operation.parentCollection != null && operation.parentId != null) {
       return _firestore
           .collection(operation.parentCollection!)

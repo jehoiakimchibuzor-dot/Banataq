@@ -273,7 +273,7 @@ class _ProviderSelectorState extends State<_ProviderSelector> {
 
   Future<void> _load() async {
     await _assistant.loadConfig();
-    final config = await StorageService().loadAiConfig();
+    final config = await di.sl<StorageService>().loadAiConfig();
     final key = config['apiKey'] as String? ?? '';
     if (!mounted) return;
     setState(() {

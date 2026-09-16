@@ -17,6 +17,7 @@ class _WelcomeAnimationState extends State<WelcomeAnimation> with SingleTickerPr
   @override
   Widget build(BuildContext context) {
     final reduce = MediaQuery.of(context).disableAnimations;
+    // ignore: unnecessary_underscores
     return AnimatedBuilder(animation: _c, builder: (_, __) {
       final p = _c.value;
       final draw = (p / 0.62).clamp(0.0, 1.0).toDouble();

@@ -119,7 +119,7 @@ final class SyncService {
 
   Future<void> retryFailed() async {
     await _ensureInitialized();
-    await _engine.processQueue();
+    await _engine.retryFailed();
   }
 
   Future<void> dispose() async {

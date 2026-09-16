@@ -44,6 +44,11 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# Build caches (not source — noisy, lock-prone)
+android/.kotlin/
+android/.gradle/
+android/app/.cxx/
+
 # Secrets / credentials — NEVER commit (Banataq: keys via --dart-define + SecureKeyStore)
 .env
 .env.*

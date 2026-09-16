@@ -4,7 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../core/di/injection_container.dart' as di;
 import '../features/auth/presentation/bloc/auth_bloc.dart';
-import '../features/auth/presentation/bloc/auth_state.dart';
 import '../features/workspace/data/repositories/workspace_repository.dart';
 import '../models/onboarding_preferences.dart';
 import '../services/storage_service.dart';
@@ -62,18 +61,15 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> with SingleTi
       }
     } catch (_) {}
     try {
-      final prefs = await StorageService().loadOnboardingPreferences();
-      final convos = await StorageService().loadConversations();
-      // spaces — try real WorkspaceRepository, fallback to empty
-      List<_SpaceRow> spaces = [];
-      try {
-        final repo = di.sl<WorkspaceRepository>();
-        final ws = repo.getWorkspace();
-        // Treat single workspace as one space if it has a name
-        if (ws.name.isNotEmpty) {
-          spaces.add(_SpaceRow(emoji: ws.emoji.isNotEmpty ? ws.emoji : '◆', title: ws.name, subtitle: ws.description, meta: ws.progressLabel ?? (ws.taskCount > 0 ? '${ws.taskDone}/${ws.taskCount}' : null)));
-        }
-      } catch (_) {}
+      final StorageService storage = di.sl<StorageService>();
+      final prefs = await storage.loadOnboardingPreferences();
+      final convos = await storage.loadConversations();
+      final repo = di.sl<WorkspaceRepository>();
+      final ws = repo.getWorkspace();
+      final spaces = <_SpaceRow>[];
+      if (ws.name.isNotEmpty) {
+        spaces.add(_SpaceRow(emoji: ws.emoji.isNotEmpty ? ws.emoji : '◆', title: ws.name, subtitle: ws.description, meta: ws.progressLabel ?? (ws.taskCount > 0 ? '${ws.taskDone}/${ws.taskCount}' : null)));
+      }
       if (mounted) setState(() { _prefs = prefs; _convos = convos; _spaces = spaces; _firstName = first; _photoUrl = photo; _loading = false; });
     } catch (_) {
       if (mounted) setState(() => _loading = false);
@@ -150,13 +146,14 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> with SingleTi
 
   Conversation? get _recent {
     if (_convos.isEmpty) return null;
-    // most recent by updatedAt / last message
-    _convos.sort((a, b) => (b.updatedAt ?? b.createdAt).compareTo(a.updatedAt ?? a.createdAt));
+    // most recent by updatedAt
+    _convos.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
     final c = _convos.first;
     if (c.messages.isEmpty && c.title.trim().isEmpty) return null;
     return c;
   }
 
+  // ignore: unused_element — reserved for deep-link chat routing (Phase 3)
   void _openChat(String prompt) {
     final cb = widget.onStartChat;
     if (cb != null) { cb(prompt); return; }

@@ -6,7 +6,8 @@ ColorScheme schemeFor(AccentTheme accent, Brightness b, AccentIntensity intensit
   final isDark = b == Brightness.dark;
   // intensity modulates glow/primary saturation
   final primary = intensity == AccentIntensity.vibrant ? t.bright : intensity == AccentIntensity.soft ? Color.lerp(t.primary, Colors.white, 0.15)! : t.primary;
-  final glow = t.glow;
+  // ignore: unused_local_variable — reserved for future glow/shadow modulation
+  final Color glow = t.glow;
   if (isDark) {
     return ColorScheme(
       brightness: Brightness.dark,

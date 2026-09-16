@@ -1,0 +1,71 @@
+rules_version = '2';
+
+// Banataq Firestore security rules.
+// Ownership model:
+//   - Workspace hierarchy lives under users/{uid}/workspaces/{wid}/...
+//   - Only the authenticated owner (request.auth.uid == uid) may read/write.
+//   - Unauthenticated access is denied everywhere (default deny).
+//   - Legacy top-level collections (conversations, settings) are guarded by
+//     the stored userId field / document id matching the caller uid.
+//
+// Deploy: firebase deploy --only firestore:rules
+// Emulator: firebase emulators:start --only firestore
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Deny everything by default; each match below opens only its own scope.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ---- User profile document: users/{uid} ----
+    match /users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+
+      // ---- Workspace hierarchy: users/{uid}/workspaces/{wid}/... ----
+      // Covers the workspace doc plus all descendants:
+      //   sessions/{sid}, sessions/{sid}/messages/{mid},
+      //   tasks/{tid}, files/{fid}, memories/{mid}, timeline/{eid}, briefing/...
+      match /workspaces/{workspaceId}/{document=**} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+    }
+
+    // ---- Legacy top-level conversations: conversations/{id} ----
+    // Kept for backward compatibility with existing clients that store
+    // conversations at the top level with a userId field.
+    // New code should prefer users/{uid}/... paths where available.
+    match /conversations/{conversationId} {
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid;
+      allow read, update, delete: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+
+      match /messages/{messageId} {
+        allow read, write: if request.auth != null
+          && get(/databases/$(database)/documents/conversations/$(conversationId)).data.userId == request.auth.uid;
+      }
+    }
+
+    // ---- Legacy top-level settings: settings/{uid} ----
+    // Document id is the owner uid.
+    match /settings/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // ---- Saved items: saved_items/{id} (owner via userId field) ----
+    match /saved_items/{itemId} {
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid;
+      allow read, update, delete: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+    }
+
+    // ---- Feedback: any authenticated user may create their own entry ----
+    match /feedback/{feedbackId} {
+      allow create: if request.auth != null;
+      allow read, update, delete: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+    }
+  }
+}

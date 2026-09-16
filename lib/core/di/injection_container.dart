@@ -32,6 +32,9 @@ import '../../features/settings/presentation/bloc/settings_bloc.dart';
 import '../network/connectivity_service.dart';
 import '../../features/sync/data/sync_service.dart';
 import '../../services/assistant_service.dart';
+import '../../services/secure_key_store.dart';
+import '../../services/storage_service.dart';
+import '../../features/workspace/data/repositories/workspace_repository.dart';
 
 final GetIt sl = GetIt.instance;
 
@@ -39,8 +42,11 @@ Future<void> initDependencies() async {
   final sharedPreferences = await SharedPreferences.getInstance();
 
   sl.registerLazySingleton<SharedPreferences>(() => sharedPreferences);
+  sl.registerLazySingleton<SecureKeyStore>(() => SecureKeyStore());
+  sl.registerLazySingleton<StorageService>(() => StorageService());
   sl.registerLazySingleton<ConnectivityService>(() => ConnectivityService());
-  sl.registerLazySingleton<AssistantService>(() => AssistantService());
+  sl.registerLazySingleton<AssistantService>(() => AssistantService(storage: sl<StorageService>()));
+  sl.registerLazySingleton<WorkspaceRepository>(() => FirestoreWorkspaceRepository());
 
   _initAuth();
   _initProfile();

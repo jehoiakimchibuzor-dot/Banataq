@@ -97,7 +97,7 @@ class _AppEntryState extends State<_AppEntry> {
   }
 
   Future<void> _loadFlags() async {
-    final s = StorageService();
+    final s = di.sl<StorageService>();
     final o = await s.isOnboardingComplete();
     final p = await s.isPersonalizationComplete();
     final f = await s.isFirstRunComplete();
@@ -155,7 +155,7 @@ class _AppEntryState extends State<_AppEntry> {
   }
 
   Future<void> _onFirstRunStart(String prompt) async {
-    await StorageService().setFirstRunComplete(value: true);
+    await di.sl<StorageService>().setFirstRunComplete(value: true);
     if (!mounted) return;
     setState(() { _firstRunDone = true; _pendingPrompt = prompt; });
   }
@@ -169,16 +169,16 @@ class _AppEntryState extends State<_AppEntry> {
         if (status == AuthStatus.unknown || status == AuthStatus.loading || !_minSplashElapsed || _onboardingDone == null || _personalizationDone == null || _firstRunDone == null) {
           child = const BrandSplashScreen();
         } else if (kOnboardingEveryLoginForTesting && status == AuthStatus.unauthenticated && _showOnboardingForTesting) {
-          child = OnboardingScreen(key: const ValueKey('onboarding-testing'), storage: StorageService(), onComplete: _onOnboardingDoneForTesting);
+          child = OnboardingScreen(key: const ValueKey('onboarding-testing'), storage: di.sl<StorageService>(), onComplete: _onOnboardingDoneForTesting);
         } else if (!_onboardingDone!) {
-          child = OnboardingScreen(key: const ValueKey('onboarding-once'), storage: StorageService(), onComplete: () => setState(() => _onboardingDone = true));
+          child = OnboardingScreen(key: const ValueKey('onboarding-once'), storage: di.sl<StorageService>(), onComplete: () => setState(() => _onboardingDone = true));
         } else if (status == AuthStatus.unauthenticated) {
           child = const LoginScreen();
         } else if (status == AuthStatus.authenticated && (_showPersonalization || !_personalizationDone!)) {
-          child = PersonalizationScreen(key: const ValueKey('personalization'), storage: StorageService(), onComplete: _onPersonalizationDone, onSkip: _onPersonalizationDone);
+          child = PersonalizationScreen(key: const ValueKey('personalization'), storage: di.sl<StorageService>(), onComplete: _onPersonalizationDone, onSkip: _onPersonalizationDone);
         } else if (status == AuthStatus.authenticated && !_firstRunDone!) {
           child = FutureBuilder<OnboardingPreferences?>(
-            future: StorageService().loadOnboardingPreferences(),
+            future: di.sl<StorageService>().loadOnboardingPreferences(),
             builder: (context, snap) {
               if (snap.connectionState != ConnectionState.done) return const BrandSplashScreen();
               final prefs = snap.data ?? const OnboardingPreferences();

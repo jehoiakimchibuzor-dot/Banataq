@@ -4,6 +4,7 @@ import 'package:banataq/core/di/injection_container.dart' as di;
 import 'package:banataq/core/errors/app_error.dart';
 import 'package:banataq/core/errors/app_result.dart';
 import 'package:banataq/services/assistant_service.dart';
+import 'package:banataq/services/storage_service.dart';
 import 'package:banataq/features/auth/domain/entities/auth_user.dart';
 import 'package:banataq/features/auth/domain/repositories/auth_repository.dart';
 import 'package:banataq/features/auth/domain/usecases/delete_account.dart';
@@ -28,6 +29,8 @@ import 'package:banataq/features/settings/domain/usecases/export_data.dart';
 import 'package:banataq/features/settings/domain/usecases/get_settings.dart';
 import 'package:banataq/features/settings/domain/usecases/update_settings.dart';
 import 'package:banataq/features/settings/presentation/bloc/settings_bloc.dart';
+import 'package:banataq/features/workspace/data/repositories/workspace_repository.dart';
+import 'package:banataq/features/workspace/services/workspace_service.dart';
 
 final class FakeAuthRepository implements AuthRepository {
   FakeAuthRepository({this.currentUser});
@@ -178,5 +181,9 @@ Future<void> initTestDependencies({AuthUser? currentUser}) async {
     () => InitializeProfile(profileRepository),
   );
 
-  di.sl.registerLazySingleton<AssistantService>(() => AssistantService());
+  di.sl.registerLazySingleton<StorageService>(() => StorageService());
+  di.sl.registerLazySingleton<AssistantService>(() => AssistantService(storage: di.sl<StorageService>()));
+  di.sl.registerLazySingleton<WorkspaceRepository>(
+    () => MockWorkspaceRepository(service: MockWorkspaceService(seed: false)),
+  );
 }

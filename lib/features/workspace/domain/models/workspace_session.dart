@@ -78,6 +78,7 @@ class WorkspaceSession {
     DateTime? updatedAt,
     List<String>? linkedFileIds,
     List<String>? linkedTaskIds,
+    DateTime? createdAt,
   }) {
     return WorkspaceSession(
       id: id,
@@ -92,7 +93,46 @@ class WorkspaceSession {
       durationLabel: durationLabel ?? this.durationLabel,
       linkedFileIds: linkedFileIds ?? this.linkedFileIds,
       linkedTaskIds: linkedTaskIds ?? this.linkedTaskIds,
-      createdAt: createdAt,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'updatedAt': updatedAt.toIso8601String(),
+        'createdAt': createdAt?.toIso8601String(),
+        'summary': summary,
+        'purpose': purpose,
+        'preview': preview,
+        'status': status.name,
+        'pinned': pinned,
+        'messageCount': messageCount,
+        'durationLabel': durationLabel,
+        'linkedFileIds': linkedFileIds,
+        'linkedTaskIds': linkedTaskIds,
+      };
+
+  factory WorkspaceSession.fromJson(Map<String, dynamic> json) {
+    return WorkspaceSession(
+      id: json['id'] as String? ?? '',
+      title: json['title'] as String? ?? '',
+      updatedAt: json['updatedAt'] != null
+          ? DateTime.tryParse(json['updatedAt'] as String) ?? DateTime.now()
+          : DateTime.now(),
+      createdAt: json['createdAt'] != null ? DateTime.tryParse(json['createdAt'] as String) : null,
+      summary: json['summary'] as String?,
+      purpose: json['purpose'] as String?,
+      preview: json['preview'] as String?,
+      status: SessionStatus.values.firstWhere(
+        (e) => e.name == json['status'],
+        orElse: () => SessionStatus.completed,
+      ),
+      pinned: json['pinned'] as bool? ?? false,
+      messageCount: json['messageCount'] as int? ?? 0,
+      durationLabel: json['durationLabel'] as String?,
+      linkedFileIds: (json['linkedFileIds'] as List?)?.map((e) => e as String).toList() ?? const [],
+      linkedTaskIds: (json['linkedTaskIds'] as List?)?.map((e) => e as String).toList() ?? const [],
     );
   }
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../models/chat_message.dart';
 import '../services/storage_service.dart';
+import '../core/di/injection_container.dart' as di;
 import '../features/auth/presentation/bloc/auth_bloc.dart';
 
 class SavedAnswersScreen extends StatefulWidget {
@@ -12,7 +13,7 @@ class SavedAnswersScreen extends StatefulWidget {
 }
 
 class _SavedAnswersScreenState extends State<SavedAnswersScreen> {
-  final _storage = StorageService();
+  StorageService get _storage => di.sl<StorageService>();
   List<ChatMessage> _answers = [];
   bool _loading = true;
 

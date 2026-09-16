@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/design_system/design_system.dart';
+import '../../../core/di/injection_container.dart' as di;
 import '../../intelligence/application/intelligence_engine.dart';
 import '../../intelligence/application/workspace_knowledge_adapter.dart';
 import '../data/repositories/workspace_repository.dart';
 import '../domain/models/workspace_session.dart';
-import '../services/workspace_service.dart';
 import '../widgets/workspace_header_sliver.dart';
 import 'session_detail_screen.dart';
 import 'tabs/files_tab.dart';
@@ -44,17 +44,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 6, vsync: this);
-    // Self-contained by default: the shell owns a mock-backed controller so
-    // the screen renders without DI/Firebase (previews, route, tests). Sprint 2
-    // passes a Firestore-backed controller here instead.
+    // Production uses the real Firestore-backed repository via DI.
+    // Tests inject a seeded MockWorkspaceRepository directly.
     _ownsController = widget.controller == null;
     _controller = widget.controller ??
         WorkspaceController(
-          repository: MockWorkspaceRepository(
-            // Runtime uses an empty workspace (no seeded GANO data); tests
-            // inject their own seeded fixture.
-            service: MockWorkspaceService(seed: false),
-          ),
+          repository: di.sl<WorkspaceRepository>(),
         );
     _controller.onNotice = (message) {
       if (mounted) AppSnackbar.show(context, message);
