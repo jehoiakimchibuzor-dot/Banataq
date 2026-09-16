@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 /// Kind of activity shown on the Timeline tab.
@@ -42,4 +43,66 @@ class TimelineEvent {
 
   /// Id of the underlying entity (session, task, file, memory), if any.
   final String? refId;
+
+  TimelineEvent copyWith({
+    String? id,
+    TimelineEventType? type,
+    String? title,
+    String? description,
+    DateTime? occurredAt,
+    String? refId,
+  }) {
+    return TimelineEvent(
+      id: id ?? this.id,
+      type: type ?? this.type,
+      title: title ?? this.title,
+      description: description ?? this.description,
+      occurredAt: occurredAt ?? this.occurredAt,
+      refId: refId ?? this.refId,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'type': type.name,
+        'title': title,
+        'description': description,
+        'refId': refId,
+        'occurredAt': Timestamp.fromDate(occurredAt),
+      };
+
+  factory TimelineEvent.fromJson(Map<String, dynamic> json) {
+    // occurredAt compatibility: Timestamp | DateTime | String | int | null
+    DateTime occurredAt;
+    final dynamic rawAt = json['occurredAt'];
+    if (rawAt == null) {
+      // No timestamp stored — use now as fallback (serverTimestamp pending)
+      occurredAt = DateTime.now();
+    } else if (rawAt is Timestamp) {
+      occurredAt = rawAt.toDate();
+    } else if (rawAt is DateTime) {
+      occurredAt = rawAt;
+    } else if (rawAt is String) {
+      occurredAt = DateTime.tryParse(rawAt) ?? DateTime.now();
+    } else if (rawAt is int) {
+      occurredAt = DateTime.fromMillisecondsSinceEpoch(rawAt);
+    } else {
+      occurredAt = DateTime.now();
+    }
+
+    final String rawType = json['type'] as String? ?? 'session';
+    final TimelineEventType type = TimelineEventType.values.firstWhere(
+      (e) => e.name == rawType,
+      orElse: () => TimelineEventType.session,
+    );
+
+    return TimelineEvent(
+      id: json['id'] as String? ?? '',
+      type: type,
+      title: json['title'] as String? ?? '',
+      description: json['description'] as String?,
+      occurredAt: occurredAt,
+      refId: json['refId'] as String?,
+    );
+  }
 }

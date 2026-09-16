@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:uuid/uuid.dart';
 import '../../../../core/constants/firestore_constants.dart';
 import '../../../../core/errors/app_error.dart';
 import '../../../../core/errors/app_result.dart';
@@ -309,17 +310,20 @@ class FirestoreWorkspaceRepository implements WorkspaceRepository {
     _tasksLoading = null;
     _filesLoading = null;
     _memoriesLoading = null;
+    _timelineLoading = null;
     _loaded = false;
     _sessionsLoaded = false;
     _tasksLoaded = false;
     _filesLoaded = false;
     _memoriesLoaded = false;
+    _timelineLoaded = false;
     try {
       await _ensureLoaded();
       await _ensureSessionsLoaded();
       await _ensureTasksLoaded();
       await _ensureFilesLoaded();
       await _ensureMemoriesLoaded();
+      await _ensureTimelineLoaded();
       _clearPersistenceError();
       return const Success<void>(null);
     } catch (e) {
@@ -345,6 +349,9 @@ class FirestoreWorkspaceRepository implements WorkspaceRepository {
   List<WorkspaceMemory> _memories = [];
   bool _memoriesLoaded = false;
   Completer<void>? _memoriesLoading;
+  List<TimelineEvent> _timeline = [];
+  bool _timelineLoaded = false;
+  Completer<void>? _timelineLoading;
 
   String? get _uid => _uidProvider?.call() ?? _auth?.currentUser?.uid;
 
@@ -388,6 +395,12 @@ class FirestoreWorkspaceRepository implements WorkspaceRepository {
     return col.doc(workspaceId).collection('memories');
   }
 
+  CollectionReference<Map<String, dynamic>>? _timelineCol(String uid, String workspaceId) {
+    final col = _col(uid);
+    if (col == null) return null;
+    return col.doc(workspaceId).collection(FirestoreConstants.timeline);
+  }
+
   Future<void> _ensureLoaded() async {
     if (_loaded) return;
     if (_loading != null) return _loading!.future;
@@ -425,7 +438,7 @@ class FirestoreWorkspaceRepository implements WorkspaceRepository {
     _workspaces = List.of(list);
     _loaded = true;
     _clearPersistenceError();
-    // Reset sessions/tasks/files/memories cache for the new workspace so tests start empty
+    // Reset sessions/tasks/files/memories/timeline cache for the new workspace so tests start empty
     _sessions = [];
     _sessionsLoaded = true;
     _messages.clear();
@@ -435,6 +448,8 @@ class FirestoreWorkspaceRepository implements WorkspaceRepository {
     _filesLoaded = true;
     _memories = [];
     _memoriesLoaded = true;
+    _timeline = [];
+    _timelineLoaded = true;
   }
 
   /// Awaited write. Returns true on success (or when there is nothing to
@@ -854,6 +869,89 @@ class FirestoreWorkspaceRepository implements WorkspaceRepository {
     }
   }
 
+  // ---- Timeline — REAL Firestore (users/{uid}/workspaces/{wid}/timeline) ----
+
+  Future<void> _ensureTimelineLoaded() async {
+    if (_timelineLoaded) return;
+    if (_timelineLoading != null) return _timelineLoading!.future;
+    _timelineLoading = Completer<void>();
+    try {
+      final uid = _uid;
+      final wid = _currentWorkspaceId;
+      if (uid == null || uid.isEmpty || wid == null || wid.isEmpty) {
+        _timeline = [];
+      } else {
+        final col = _timelineCol(uid, wid);
+        if (col == null) {
+          _timeline = [];
+        } else {
+          final snap = await col.orderBy('occurredAt', descending: true).get();
+          _timeline = snap.docs.map((d) {
+            final data = d.data();
+            data['id'] = d.id;
+            return TimelineEvent.fromJson(data);
+          }).toList();
+        }
+      }
+      _timelineLoaded = true;
+      _timelineLoading!.complete();
+    } catch (_) {
+      _timelineLoaded = true;
+      if (!(_timelineLoading?.isCompleted ?? true)) _timelineLoading!.complete();
+    }
+  }
+
+  Future<bool> _persistTimelineEvent(TimelineEvent e) async {
+    final uid = _uid;
+    final wid = _currentWorkspaceId;
+    if (uid == null || wid == null || wid.isEmpty) return true;
+    final col = _timelineCol(uid, wid);
+    if (col == null) return true;
+    try {
+      // Preserve the event's occurredAt as Timestamp; serverTimestamp only fallback is handled in fromJson
+      final Map<String, dynamic> data = e.toJson();
+      // Ensure occurredAt is Timestamp (toJson already does), but guard null
+      if (data['occurredAt'] == null) {
+        data['occurredAt'] = FieldValue.serverTimestamp();
+      }
+      await col.doc(e.id).set(data, SetOptions(merge: true));
+      return true;
+    } catch (ex) {
+      _recordPersistenceError(ex);
+      return false;
+    }
+  }
+
+  TimelineEvent _newTimelineEvent(
+    TimelineEventType type,
+    String title, {
+    String? description,
+    String? refId,
+    DateTime? occurredAt,
+  }) {
+    final DateTime at = occurredAt ?? DateTime.now();
+    // Collision-safe ID: timestamp + uuid fragment (uuid is the project's existing mechanism)
+    final String id = 'tl-${at.millisecondsSinceEpoch}-${const Uuid().v4().substring(0, 8)}';
+    return TimelineEvent(
+      id: id,
+      type: type,
+      title: title,
+      description: description,
+      occurredAt: at,
+      refId: refId,
+    );
+  }
+
+  void _insertTimelineEvent(TimelineEvent e) {
+    // Newest-first: insert at 0 (matches MockWorkspaceService._event and UI expectation)
+    _timeline.insert(0, e);
+    _timelineLoaded = true;
+    final TimelineEvent inserted = e;
+    _trackPersistence(_persistTimelineEvent(inserted), () {
+      _timeline.removeWhere((x) => x.id == inserted.id);
+    });
+  }
+
   @override
   List<WorkspaceSession> loadSessions() {
     if (!_sessionsLoaded) unawaited(_ensureSessionsLoaded());
@@ -956,6 +1054,14 @@ class FirestoreWorkspaceRepository implements WorkspaceRepository {
       _sessions.removeWhere((s) => s.id == id);
       _messages.remove(id);
     });
+    final TimelineEvent tlCreate = _newTimelineEvent(
+      TimelineEventType.session,
+      'Chat started',
+      description: title.trim().isEmpty ? 'Untitled session' : title.trim(),
+      refId: id,
+      occurredAt: now,
+    );
+    _insertTimelineEvent(tlCreate);
     return WorkspaceSessionDetail(session: session, messages: const []);
   }
 
@@ -996,6 +1102,14 @@ class FirestoreWorkspaceRepository implements WorkspaceRepository {
       if (rIdx >= 0) _sessions[rIdx] = prevSession;
       _messages[sessionId] = List<WorkspaceSessionMessage>.of(prevMsgs);
     });
+    final TimelineEvent tlMsg = _newTimelineEvent(
+      TimelineEventType.session,
+      'New message',
+      description: prompt,
+      refId: sessionId,
+      occurredAt: now,
+    );
+    _insertTimelineEvent(tlMsg);
     return WorkspaceSessionDetail(session: _sessions[idx], messages: List.of(_messages[sessionId]!));
   }
 
@@ -1015,6 +1129,16 @@ class FirestoreWorkspaceRepository implements WorkspaceRepository {
     final list = _messages[sessionId] ?? [];
     _messages[sessionId] = [...list, msg];
     _trackPersistence(_persistMessage(sessionId, msg), () => _messages[sessionId] = List<WorkspaceSessionMessage>.of(prevMsgs));
+    if (author == MessageAuthor.user) {
+      final TimelineEvent tlAddMsg = _newTimelineEvent(
+        TimelineEventType.session,
+        'New message',
+        description: text,
+        refId: sessionId,
+        occurredAt: now,
+      );
+      _insertTimelineEvent(tlAddMsg);
+    }
     if (idx >= 0) {
       _sessions[idx] = _sessions[idx].copyWith(messageCount: _messages[sessionId]!.length, updatedAt: now);
       _trackPersistence(_persistSession(_sessions[idx]), () {
@@ -1066,8 +1190,19 @@ class FirestoreWorkspaceRepository implements WorkspaceRepository {
     return List.of(_memories);
   }
 
+  /// Synchronous timeline snapshot. If not yet loaded, triggers a Firestore
+  /// fetch and returns the current (possibly empty) cache. The cache is
+  /// replaced deterministically when the fetch completes:
+  /// `first load → Firestore fetch → _timeline = docs → _timelineLoaded = true`.
+  /// The existing `WorkspaceController` uses this sync API; it will see stale
+  /// (empty) data on first call until the fetch completes and requires an
+  /// explicit `refresh()` or next `loadTimeline()` to see new data. We avoid
+  /// introducing a second async/state-management layer here.
   @override
-  List<TimelineEvent> loadTimeline() => _fallback.loadTimeline();
+  List<TimelineEvent> loadTimeline() {
+    if (!_timelineLoaded) unawaited(_ensureTimelineLoaded());
+    return List.of(_timeline);
+  }
   @override
   WorkspaceSearchResults search(String query) => _fallback.search(query);
   @override
@@ -1086,6 +1221,14 @@ class FirestoreWorkspaceRepository implements WorkspaceRepository {
         final int rIdx = _tasks.indexWhere((x) => x.id == taskId);
         if (rIdx >= 0) _tasks[rIdx] = previous;
       });
+      final TimelineEvent tlTask = _newTimelineEvent(
+        done ? TimelineEventType.milestone : TimelineEventType.task,
+        done ? 'Task completed' : 'Task reopened',
+        description: updated.title,
+        refId: taskId,
+        occurredAt: DateTime.now(),
+      );
+      _insertTimelineEvent(tlTask);
     }
     return List.of(_tasks);
   }
@@ -1122,6 +1265,14 @@ class FirestoreWorkspaceRepository implements WorkspaceRepository {
       _trackPersistence(_persistTask(t), () {
         _tasks.removeWhere((x) => x.id == addedId);
       });
+      final TimelineEvent tlAddTask = _newTimelineEvent(
+        TimelineEventType.task,
+        'Task added',
+        description: t.title,
+        refId: t.id,
+        occurredAt: DateTime.now(),
+      );
+      _insertTimelineEvent(tlAddTask);
     }
     return List.of(_tasks);
   }
@@ -1152,6 +1303,14 @@ class FirestoreWorkspaceRepository implements WorkspaceRepository {
     _trackPersistence(_persistFile(file), () {
       _files.removeWhere((f) => f.id == id);
     });
+    final TimelineEvent tlFile = _newTimelineEvent(
+      TimelineEventType.file,
+      'File added',
+      description: name,
+      refId: id,
+      occurredAt: file.createdAt ?? DateTime.now(),
+    );
+    _insertTimelineEvent(tlFile);
     return List.of(_files);
   }
 
@@ -1214,6 +1373,14 @@ class FirestoreWorkspaceRepository implements WorkspaceRepository {
         final int rIdx = _files.indexWhere((f) => f.id == fileId);
         if (rIdx >= 0) _files[rIdx] = previous;
       });
+      final TimelineEvent tlSum = _newTimelineEvent(
+        TimelineEventType.file,
+        'File summarized',
+        description: file.name,
+        refId: fileId,
+        occurredAt: DateTime.now(),
+      );
+      _insertTimelineEvent(tlSum);
       return updated;
     }
     return _fallback.summarizeFile(fileId);
@@ -1230,6 +1397,14 @@ class FirestoreWorkspaceRepository implements WorkspaceRepository {
     _trackPersistence(_persistMemory(mem), () {
       _memories.removeWhere((m) => m.id == id);
     });
+    final TimelineEvent tlMem = _newTimelineEvent(
+      TimelineEventType.memory,
+      'Memory saved',
+      description: title,
+      refId: id,
+      occurredAt: now,
+    );
+    _insertTimelineEvent(tlMem);
     return List.of(_memories);
   }
 
