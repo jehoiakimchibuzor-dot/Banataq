@@ -14,6 +14,7 @@ import '../domain/models/workspace_session_detail.dart';
 import '../domain/models/workspace_suggestion.dart';
 import '../domain/models/workspace_task.dart';
 import '../domain/models/workspace_timeline.dart';
+import '../domain/services/briefing_deriver.dart';
 
 /// Owns the workspace state the Overview, Sessions and Tasks tabs render.
 ///
@@ -133,7 +134,10 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   /// Recomputes workspace progress and rebuilds the overview aggregate from
-  /// the controller's own lists so every surface stays in sync.
+  /// the controller's own lists so every surface stays in sync. Briefing is
+  /// recomputed from current workspace state (tasks/sessions/files/memories/
+  /// timeline) via [BriefingDeriver] — no longer preserved from previous
+  /// overview.
   void _rebuildOverview() {
     final activeTasks = _tasks.where((t) => !t.archived).toList();
     final activeSessions = _sessions.where((s) => !s.archived).toList();
@@ -144,9 +148,17 @@ class WorkspaceController extends ChangeNotifier {
       taskCount: activeTasks.length,
       taskDone: doneCount,
     );
+    final List<BriefingLine> derivedBriefing = BriefingDeriver.derive(
+      workspace: _workspace ?? _overview.workspace,
+      tasks: activeTasks,
+      sessions: activeSessions,
+      files: _files,
+      memories: _memories,
+      timeline: _timeline,
+    );
     _overview = WorkspaceOverview(
       workspace: _workspace ?? _overview.workspace,
-      briefing: _overview.briefing,
+      briefing: derivedBriefing,
       continueTitle: _overview.continueTitle,
       continueSnippet: _overview.continueSnippet,
       continueProgress: _overview.continueProgress,
@@ -319,7 +331,7 @@ class WorkspaceController extends ChangeNotifier {
   // ---- Briefing & search ----
 
   void regenerateBriefing() {
-    final lines = repository.regenerateBriefing();
+    final List<BriefingLine> lines = repository.regenerateBriefing();
     _overview = WorkspaceOverview(
       workspace: _overview.workspace,
       briefing: lines,

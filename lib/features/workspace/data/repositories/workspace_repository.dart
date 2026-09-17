@@ -17,6 +17,7 @@ import '../../domain/models/workspace_session_detail.dart';
 import '../../domain/models/workspace_session_message.dart';
 import '../../domain/models/workspace_task.dart';
 import '../../domain/models/workspace_timeline.dart';
+import '../../domain/services/briefing_deriver.dart';
 import '../../services/workspace_service.dart';
 
 /// Seam between the app and workspace data.
@@ -505,14 +506,36 @@ class FirestoreWorkspaceRepository implements WorkspaceRepository {
   WorkspaceOverview loadOverview() {
     // Trigger async load but return immediate cache
     unawaited(_ensureLoaded());
+    // Derive briefing from real collections — no longer from mock fallback
+    final List<BriefingLine> derivedBriefing = BriefingDeriver.derive(
+      workspace: _workspaces.isNotEmpty ? _workspaces.first : getWorkspace(),
+      tasks: List.of(_tasks),
+      sessions: List.of(_sessions),
+      files: List.of(_files),
+      memories: List.of(_memories),
+      timeline: List.of(_timeline),
+    );
     if (_workspaces.isEmpty) {
-      return _fallback.loadOverview();
+      final base = _fallback.loadOverview();
+      return WorkspaceOverview(
+        workspace: base.workspace,
+        briefing: derivedBriefing,
+        continueTitle: base.continueTitle,
+        continueSnippet: base.continueSnippet,
+        continueProgress: base.continueProgress,
+        continueProgressLabel: base.continueProgressLabel,
+        tasks: base.tasks,
+        sessions: base.sessions,
+        files: base.files,
+        memories: base.memories,
+        suggestions: base.suggestions,
+      );
     }
     final ws = _workspaces.first;
     final base = _fallback.loadOverview();
     return WorkspaceOverview(
       workspace: ws,
-      briefing: base.briefing,
+      briefing: derivedBriefing,
       continueTitle: base.continueTitle,
       continueSnippet: base.continueSnippet,
       continueProgress: base.continueProgress,
@@ -1454,7 +1477,17 @@ class FirestoreWorkspaceRepository implements WorkspaceRepository {
     return List.of(_memories);
   }
   @override
-  List<BriefingLine> regenerateBriefing() => _fallback.regenerateBriefing();
+  List<BriefingLine> regenerateBriefing() {
+    // Recompute from current workspace state — no longer cycles mock variants
+    return BriefingDeriver.derive(
+      workspace: getWorkspace(),
+      tasks: List.of(_tasks),
+      sessions: List.of(_sessions),
+      files: List.of(_files),
+      memories: List.of(_memories),
+      timeline: List.of(_timeline),
+    );
+  }
 
   // For HomeDashboard empty check
   List<Workspace> loadWorkspaces() => List.of(_workspaces);
