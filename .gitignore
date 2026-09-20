@@ -33,6 +33,9 @@ migrate_working_dir/
 /build/
 /coverage/
 
+# Node (Storage rules tests)
+node_modules/
+
 # Symbolication related
 app.*.symbols
 

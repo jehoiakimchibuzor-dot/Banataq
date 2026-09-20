@@ -49,6 +49,7 @@ dependencies:
   intl: ^0.20.3
   uuid: ^4.6.0
   http: ^1.6.0
+  url_launcher: ^6.2.5
   flutter_lints: ^6.0.0
   bloc_test: ^10.0.0
   mocktail: ^1.0.5

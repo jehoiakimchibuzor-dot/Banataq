@@ -1,6 +1,9 @@
-﻿import 'package:flutter/material.dart';
+﻿import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
 import '../../../../core/design_system/design_system.dart';
+import '../../../../core/errors/app_result.dart';
 import '../../domain/models/workspace_file.dart';
+import '../../domain/models/workspace_file_upload_request.dart';
 import '../../widgets/common/workspace_filter_chips.dart';
 import '../../widgets/files/file_detail_sheet.dart';
 import '../../widgets/files/file_grid_card.dart';
@@ -121,6 +124,19 @@ class _FilesTabState extends State<FilesTab> {
               ),
             ),
           ),
+          if (controller.isUploading)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: spacing.md, vertical: spacing.sm),
+                child: Row(
+                  children: [
+                    const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                    SizedBox(width: spacing.sm),
+                    Text('Uploading file...', style: textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+                  ],
+                ),
+              ),
+            ),
           if (loading)
             const SliverPadding(
               padding: EdgeInsets.symmetric(horizontal: 16, vertical: 24),
@@ -200,8 +216,8 @@ class _FilesTabState extends State<FilesTab> {
               bottom: spacing.md,
               child: AppFAB(
                 icon: Icons.upload_file_rounded,
-                label: 'Add file',
-                onPressed: _addFile,
+                label: controller.isUploading ? 'Uploading...' : 'Add file',
+                onPressed: controller.isUploading ? null : _addFile,
                 tooltip: 'Add a file to this workspace',
               ),
             ),
@@ -253,13 +269,147 @@ class _FilesTabState extends State<FilesTab> {
   }
 
   Future<void> _addFile() async {
-    final result = await AppBottomSheet.show<_FileDraft>(
-      context,
-      title: 'Add a file',
-      child: const _AddFileSheet(),
-    );
-    if (result == null || !mounted) return;
-    widget.controller.addFile(result.name, result.type);
+    if (widget.controller.isUploading) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Upload already in progress')));
+      return;
+    }
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: false,
+        type: FileType.any,
+        withData: false,
+      );
+      if (result == null || result.files.isEmpty) return;
+      final PlatformFile pf = result.files.first;
+      final String? path = pf.path;
+      if (path == null || path.trim().isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('File path unavailable')));
+        return;
+      }
+      if (pf.size > 50 * 1024 * 1024) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('File exceeds 50 MB limit')));
+        return;
+      }
+      if (pf.size <= 0) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('File is empty')));
+        return;
+      }
+      final String fileName = pf.name.trim().isEmpty ? 'file' : pf.name.trim();
+      final String ext = (pf.extension ?? '').toLowerCase();
+      final AppFileType type = _appFileTypeFromExtension(ext);
+      final String? mimeType = _mimeFromExtension(ext);
+      final request = WorkspaceFileUploadRequest(
+        localPath: path,
+        fileName: fileName,
+        mimeType: mimeType,
+        sizeBytes: pf.size,
+        type: type,
+      );
+      final AppResult<WorkspaceFile> res = await widget.controller.uploadWorkspaceFile(request);
+      if (!mounted) return;
+      if (res is Failure<WorkspaceFile>) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Upload failed: ${res.error.message}')));
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Pick failed: $e')));
+    }
+  }
+
+  AppFileType _appFileTypeFromExtension(String ext) {
+    switch (ext) {
+      case 'pdf':
+        return AppFileType.pdf;
+      case 'jpg':
+      case 'jpeg':
+      case 'png':
+      case 'webp':
+      case 'gif':
+      case 'heic':
+        return AppFileType.image;
+      case 'mp3':
+      case 'wav':
+      case 'm4a':
+      case 'aac':
+      case 'ogg':
+        return AppFileType.audio;
+      case 'doc':
+      case 'docx':
+      case 'txt':
+      case 'rtf':
+      case 'odt':
+        return AppFileType.document;
+      case 'xls':
+      case 'xlsx':
+      case 'csv':
+      case 'ods':
+        return AppFileType.sheet;
+      case 'zip':
+      case 'rar':
+      case '7z':
+      case 'tar':
+      case 'gz':
+        return AppFileType.link;
+      case 'js':
+      case 'ts':
+      case 'dart':
+      case 'py':
+      case 'java':
+      case 'kt':
+      case 'html':
+      case 'css':
+      case 'json':
+      case 'xml':
+        return AppFileType.code;
+      default:
+        return AppFileType.unknown;
+    }
+  }
+
+  String? _mimeFromExtension(String ext) {
+    switch (ext) {
+      case 'pdf':
+        return 'application/pdf';
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'png':
+        return 'image/png';
+      case 'webp':
+        return 'image/webp';
+      case 'gif':
+        return 'image/gif';
+      case 'mp3':
+        return 'audio/mpeg';
+      case 'wav':
+        return 'audio/wav';
+      case 'm4a':
+        return 'audio/mp4';
+      case 'doc':
+        return 'application/msword';
+      case 'docx':
+        return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      case 'xls':
+        return 'application/vnd.ms-excel';
+      case 'xlsx':
+        return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      case 'csv':
+        return 'text/csv';
+      case 'txt':
+        return 'text/plain';
+      case 'zip':
+        return 'application/zip';
+      case 'json':
+        return 'application/json';
+      case 'html':
+        return 'text/html';
+      default:
+        return null;
+    }
   }
 }
 

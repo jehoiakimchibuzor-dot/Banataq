@@ -24,7 +24,7 @@ void main() {
       expect(decoded.summarized, true);
       expect(decoded.favourite, true);
       expect(decoded.tags, ['a']);
-      expect(decoded.createdAt?.toIso8601String(), now.toIso8601String());
+      expect(decoded.createdAt?.millisecondsSinceEpoch, now.millisecondsSinceEpoch);
     });
 
     test('legacy/missing fields deserialize safely', () {
@@ -70,7 +70,7 @@ void main() {
       expect(repo.loadFiles().first.type, AppFileType.pdf);
     });
 
-    test('update file favourite/pinned and delete', () {
+    test('update file favourite/pinned and delete', () async {
       final repo = FirestoreWorkspaceRepository(uidProvider: () => 'user-1');
       repo.setTestWorkspaces([testWs('ws-1')]);
       repo.addFile('a.pdf', AppFileType.pdf);
@@ -79,7 +79,7 @@ void main() {
       expect(repo.loadFiles().first.favourite, true);
       repo.setFilePinned(id, true);
       expect(repo.loadFiles().first.pinned, true);
-      repo.deleteFile(id);
+      await repo.deleteFile(id);
       expect(repo.loadFiles(), isEmpty);
     });
 

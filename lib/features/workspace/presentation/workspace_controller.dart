@@ -3,9 +3,12 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../../../core/design_system/design_system.dart';
+import '../../../core/errors/app_error.dart';
+import '../../../core/errors/app_result.dart';
 import '../data/repositories/workspace_repository.dart';
 import '../domain/models/workspace.dart';
 import '../domain/models/workspace_file.dart';
+import '../domain/models/workspace_file_upload_request.dart';
 import '../domain/models/workspace_memory.dart';
 import '../domain/models/workspace_overview.dart';
 import '../domain/models/workspace_search.dart';
@@ -55,8 +58,13 @@ class WorkspaceController extends ChangeNotifier {
   WorkspaceSearchResults _searchResults = const WorkspaceSearchResults();
   bool _searching = false;
   bool _loading = false;
+  bool _isUploading = false;
+  String? _uploadError;
   bool _disposed = false;
   Completer<void>? _initialLoadCompleter;
+
+  bool get isUploading => _isUploading;
+  String? get uploadError => _uploadError;
 
   /// Set by the screen so the controller can surface transient notices
   /// (SnackBars) without holding a BuildContext.
@@ -253,8 +261,54 @@ class WorkspaceController extends ChangeNotifier {
     onNotice?.call('Added "$name" to the workspace');
   }
 
-  void deleteFile(WorkspaceFile file) {
-    _files = repository.deleteFile(file.id);
+  /// Real file upload — validates via [WorkspaceFileUploadRequest] and
+  /// orchestrates Storage → Firestore with rollback. Prevents duplicate
+  /// uploads while one is in flight.
+  Future<AppResult<WorkspaceFile>> uploadWorkspaceFile(WorkspaceFileUploadRequest request) async {
+    if (_isUploading) {
+      const AppResult<WorkspaceFile> err = Failure(ValidationError('Upload already in progress'));
+      onNotice?.call('Upload already in progress');
+      return err;
+    }
+    _isUploading = true;
+    _uploadError = null;
+    notifyListeners();
+    final AppResult<WorkspaceFile> result = await repository.uploadWorkspaceFile(request);
+    if (result is Success<WorkspaceFile>) {
+      _files = repository.loadFiles();
+      _timeline = repository.loadTimeline();
+      _rebuildOverview();
+      onNotice?.call('Added "${request.fileName}"');
+    } else if (result is Failure<WorkspaceFile>) {
+      _uploadError = result.error.message;
+      onNotice?.call('Upload failed: ${result.error.message}');
+    }
+    _isUploading = false;
+    notifyListeners();
+    return result;
+  }
+
+  /// Opens a workspace file via its Storage path → download URL.
+  /// Returns the URL on success for the UI to launch.
+  Future<AppResult<String>> openWorkspaceFile(WorkspaceFile file) async {
+    final AppResult<String> result = await repository.getFileDownloadUrl(file.id);
+    if (result is Failure<String>) {
+      onNotice?.call('Open failed: ${result.error.message}');
+    }
+    return result;
+  }
+
+  Future<void> deleteFile(WorkspaceFile file) async {
+    final AppResult<void> result = await repository.deleteFile(file.id);
+    if (result is Failure<void>) {
+      _files = repository.loadFiles();
+      _timeline = repository.loadTimeline();
+      _rebuildOverview();
+      notifyListeners();
+      onNotice?.call('Delete failed: ${result.error.message}');
+      return;
+    }
+    _files = repository.loadFiles();
     _timeline = repository.loadTimeline();
     _rebuildOverview();
     notifyListeners();

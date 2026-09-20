@@ -16,9 +16,11 @@ import '../../domain/models/workspace_session.dart';
 import '../../domain/models/workspace_session_detail.dart';
 import '../../domain/models/workspace_session_message.dart';
 import '../../domain/models/workspace_task.dart';
+import '../../domain/models/workspace_file_upload_request.dart';
 import '../../domain/models/workspace_timeline.dart';
 import '../../domain/services/briefing_deriver.dart';
 import '../../services/workspace_service.dart';
+import '../services/file_storage_service.dart';
 
 /// Seam between the app and workspace data.
 ///
@@ -56,7 +58,9 @@ abstract interface class WorkspaceRepository {
   List<WorkspaceTask> suggestTasks(String topic);
 
   List<WorkspaceFile> addFile(String name, AppFileType type);
-  List<WorkspaceFile> deleteFile(String fileId);
+  Future<AppResult<WorkspaceFile>> uploadWorkspaceFile(WorkspaceFileUploadRequest request);
+  Future<AppResult<String>> getFileDownloadUrl(String fileId);
+  Future<AppResult<void>> deleteFile(String fileId);
   List<WorkspaceFile> setFileFavourite(String fileId, bool favourite);
   List<WorkspaceFile> setFilePinned(String fileId, bool pinned);
   WorkspaceFile summarizeFile(String fileId);
@@ -176,8 +180,27 @@ class MockWorkspaceRepository implements WorkspaceRepository {
       _service.addFile(name, type);
 
   @override
-  List<WorkspaceFile> deleteFile(String fileId) =>
-      _service.deleteFile(fileId);
+  Future<AppResult<WorkspaceFile>> uploadWorkspaceFile(WorkspaceFileUploadRequest request) async {
+    // Mock: create placeholder file without Storage (no real upload)
+    final files = _service.addFile(request.fileName, request.type);
+    final created = files.firstWhere((f) => f.name == request.fileName, orElse: () => files.first);
+    return Success(created);
+  }
+
+  @override
+  Future<AppResult<String>> getFileDownloadUrl(String fileId) async {
+    final file = _service.loadFiles().firstWhere((f) => f.id == fileId, orElse: () => WorkspaceFile(id: fileId, name: '', type: AppFileType.unknown));
+    if (file.storagePath != null && file.storagePath!.isNotEmpty) {
+      return Success('https://example.com/${file.storagePath}');
+    }
+    return Failure(const NotFoundError('File has no storage path'));
+  }
+
+  @override
+  Future<AppResult<void>> deleteFile(String fileId) async {
+    _service.deleteFile(fileId);
+    return const Success(null);
+  }
 
   @override
   List<WorkspaceFile> setFileFavourite(String fileId, bool favourite) =>
@@ -231,10 +254,12 @@ class FirestoreWorkspaceRepository implements WorkspaceRepository {
     FirebaseFirestore? firestore,
     FirebaseAuth? auth,
     WorkspaceService? fallbackService,
+    FileStorageService? fileStorageService,
     this._uidProvider,
   })  : _firestore = firestore ?? _safeFirestore(),
         _auth = auth ?? _safeAuth(),
-        _fallback = fallbackService ?? MockWorkspaceService(seed: false);
+        _fallback = fallbackService ?? MockWorkspaceService(seed: false),
+        _fileStorage = fileStorageService ?? FileStorageService();
 
   static FirebaseFirestore? _safeFirestore() {
     try {
@@ -256,6 +281,7 @@ class FirestoreWorkspaceRepository implements WorkspaceRepository {
   final FirebaseFirestore? _firestore;
   final FirebaseAuth? _auth;
   final WorkspaceService _fallback;
+  final FileStorageService _fileStorage;
   final String? Function()? _uidProvider;
 
   // ---- Persistence outcome (Phase 1 hardening) ----
@@ -354,6 +380,11 @@ class FirestoreWorkspaceRepository implements WorkspaceRepository {
   bool _timelineLoaded = false;
   Completer<void>? _timelineLoading;
 
+  // Testing hook: force next _persistFile to fail (to test Storage cleanup)
+  bool _testForcePersistFailure = false;
+  @visibleForTesting
+  void setTestForcePersistFailure(bool value) => _testForcePersistFailure = value;
+
   String? get _uid => _uidProvider?.call() ?? _auth?.currentUser?.uid;
 
   bool get _isUnauthenticated => _uid == null || _uid!.isEmpty;
@@ -387,7 +418,7 @@ class FirestoreWorkspaceRepository implements WorkspaceRepository {
   CollectionReference<Map<String, dynamic>>? _filesCol(String uid, String workspaceId) {
     final col = _col(uid);
     if (col == null) return null;
-    return col.doc(workspaceId).collection('files');
+    return col.doc(workspaceId).collection(FirestoreConstants.files);
   }
 
   CollectionReference<Map<String, dynamic>>? _memoriesCol(String uid, String workspaceId) {
@@ -801,6 +832,11 @@ class FirestoreWorkspaceRepository implements WorkspaceRepository {
   }
 
   Future<bool> _persistFile(WorkspaceFile f) async {
+    if (_testForcePersistFailure) {
+      _testForcePersistFailure = false;
+      _recordPersistenceError('mock firestore fail (test hook)');
+      return false;
+    }
     final uid = _uid;
     final wid = _currentWorkspaceId;
     if (uid == null || wid == null || wid.isEmpty) return true;
@@ -1319,8 +1355,19 @@ class FirestoreWorkspaceRepository implements WorkspaceRepository {
   @override
   List<WorkspaceFile> addFile(String name, AppFileType type) {
     if (_isUnauthenticated) return List.of(_files);
-    final id = 'f-${DateTime.now().millisecondsSinceEpoch}';
-    final file = WorkspaceFile(id: id, name: name, type: type, createdAt: DateTime.now(), meta: 'Just added');
+    final String id = 'f-${const Uuid().v4()}';
+    final DateTime now = DateTime.now();
+    final file = WorkspaceFile(
+      id: id,
+      name: name,
+      type: type,
+      mimeType: null,
+      sizeBytes: 0,
+      storagePath: null,
+      createdAt: now,
+      updatedAt: now,
+      meta: 'Just added',
+    );
     _files.insert(0, file);
     _filesLoaded = true;
     _trackPersistence(_persistFile(file), () {
@@ -1338,17 +1385,118 @@ class FirestoreWorkspaceRepository implements WorkspaceRepository {
   }
 
   @override
-  List<WorkspaceFile> deleteFile(String fileId) {
-    if (_isUnauthenticated) return List.of(_files);
+  Future<AppResult<WorkspaceFile>> uploadWorkspaceFile(WorkspaceFileUploadRequest request) async {
+    if (_isUnauthenticated) return const Failure(AuthError('Not authenticated'));
+    final String? uid = _uid;
+    final String? wid = _currentWorkspaceId;
+    if (uid == null || uid.isEmpty || wid == null || wid.isEmpty) {
+      return const Failure(ValidationError('Missing uid or workspace'));
+    }
+    // Validate is also done in FileStorageService, but quick check here
+    if (request.localPath.trim().isEmpty) return const Failure(ValidationError('File path is empty'));
+    if (request.fileName.trim().isEmpty) return const Failure(ValidationError('File name is empty'));
+    if (request.sizeBytes <= 0) return const Failure(ValidationError('File is empty'));
+    if (request.sizeBytes > FileStorageService.kMaxFileSize) {
+      return const Failure(ValidationError('File exceeds 50 MB limit'));
+    }
+    // Generate stable fid (UUID) — same for Firestore doc and Storage directory
+    final String fid = 'f-${const Uuid().v4()}';
+    final DateTime now = DateTime.now();
+    // Upload to Storage first
+    final AppResult<String> uploadRes = await _fileStorage.uploadWorkspaceFile(
+      uid: uid,
+      workspaceId: wid,
+      fileId: fid,
+      request: request,
+    );
+    if (uploadRes is Failure<String>) {
+      return Failure(uploadRes.error);
+    }
+    final String storagePath = (uploadRes as Success<String>).data;
+    // Build Firestore metadata
+    final String meta = '${(request.sizeBytes / 1024).toStringAsFixed(1)} KB';
+    final WorkspaceFile file = WorkspaceFile(
+      id: fid,
+      name: request.fileName,
+      type: request.type,
+      mimeType: request.mimeType,
+      sizeBytes: request.sizeBytes,
+      storagePath: storagePath,
+      meta: meta,
+      createdAt: now,
+      updatedAt: now,
+    );
+    // Optimistic cache insert
+    _files.insert(0, file);
+    _filesLoaded = true;
+    // Persist Firestore doc
+    final bool persisted = await _persistFile(file);
+    if (!persisted) {
+      // Firestore failed after Storage succeeded → cleanup Storage orphan
+      final String failedPath = storagePath;
+      _files.removeWhere((f) => f.id == fid);
+      // Best-effort cleanup
+      await _fileStorage.deleteWorkspaceFile(storagePath: failedPath);
+      return Failure(ServerError(details: lastPersistenceError ?? 'Firestore persist failed'));
+    }
+    // Also persist timeline
+    final TimelineEvent tl = _newTimelineEvent(
+      TimelineEventType.file,
+      'File added',
+      description: request.fileName,
+      refId: fid,
+      occurredAt: now,
+    );
+    _insertTimelineEvent(tl);
+    return Success(file);
+  }
+
+  @override
+  Future<AppResult<String>> getFileDownloadUrl(String fileId) async {
+    final WorkspaceFile? file = _files.cast<WorkspaceFile?>().firstWhere((f) => f?.id == fileId, orElse: () => null);
+    // If not in cache, try to load from Firestore (ensure loaded)
+    if (file == null) {
+      if (!_filesLoaded) await _ensureFilesLoaded();
+      final found = _files.where((f) => f.id == fileId).toList();
+      if (found.isEmpty) return const Failure(NotFoundError('File not found'));
+      final f = found.first;
+      if (f.storagePath == null || f.storagePath!.isEmpty) {
+        return const Failure(ValidationError('File has no storage path'));
+      }
+      return _fileStorage.getDownloadUrl(f.storagePath!);
+    }
+    if (file.storagePath == null || file.storagePath!.isEmpty) {
+      return const Failure(ValidationError('File has no storage path — legacy placeholder'));
+    }
+    return _fileStorage.getDownloadUrl(file.storagePath!);
+  }
+
+  @override
+  Future<AppResult<void>> deleteFile(String fileId) async {
+    if (_isUnauthenticated) return const Failure(AuthError('Not authenticated'));
+    // Capture storagePath before mutation
+    final WorkspaceFile? toDelete = _files.cast<WorkspaceFile?>().firstWhere((f) => f?.id == fileId, orElse: () => null);
+    final String? storagePath = toDelete?.storagePath;
     final List<WorkspaceFile> snapshot = List<WorkspaceFile>.of(_files);
     final bool hadItem = _files.any((f) => f.id == fileId);
     _files.removeWhere((f) => f.id == fileId);
-    _trackPersistence(_deleteFileDoc(fileId), () {
+    // Firestore persistence — awaited (Phase 1 hardened, no fire-and-forget)
+    final bool firestoreOk = await _deleteFileDoc(fileId);
+    if (!firestoreOk) {
       if (hadItem && _files.every((f) => f.id != fileId)) {
         _files = List<WorkspaceFile>.of(snapshot);
       }
-    });
-    return List.of(_files);
+      return Failure(ServerError(details: lastPersistenceError ?? 'Firestore delete failed'));
+    }
+    // Storage deletion — properly awaited (not fire-and-forget)
+    if (storagePath != null && storagePath.isNotEmpty) {
+      final AppResult<void> storageRes = await _fileStorage.deleteWorkspaceFile(storagePath: storagePath);
+      if (storageRes is Failure<void>) {
+        _recordPersistenceError('Storage delete failed for $fileId: ${storageRes.error.message}');
+        return Failure(storageRes.error);
+      }
+    }
+    return const Success(null);
   }
 
   @override

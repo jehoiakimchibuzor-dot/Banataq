@@ -1,0 +1,59 @@
+rules_version = '2';
+
+// Banataq Firebase Storage security rules.
+// Mirrors Firestore ownership model for workspace files and preserves
+// existing runtime paths for chats and avatars.
+//
+// Deploy: firebase deploy --only storage
+// Emulator: firebase emulators:start --only storage
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Workspace files — users/{uid}/workspaces/{wid}/files/{fid}/{file}
+    // Can be listed via files/{fid} directory (list) and fileName (object).
+    // Create/update enforce 50 MB limit; read/delete enforce owner only.
+    // Do NOT use request.resource.size for read/delete (not available).
+    match /users/{uid}/workspaces/{workspaceId}/files/{fileId}/{fileName} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+                            && request.resource.size <= 50 * 1024 * 1024;
+    }
+    match /users/{uid}/workspaces/{workspaceId}/files/{fileId} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+                            && request.resource.size <= 50 * 1024 * 1024;
+    }
+
+    // Chats — existing runtime path: users/{uid}/chats/{cid}/{fileName}
+    // Preserved from home_screen.dart:334 (putFile) — owner-only.
+    // No prior storage.rules existed; current app relies on authenticated uid
+    // check (if(uid==null) return). Keep same semantics and enforce size limit.
+    match /users/{uid}/chats/{chatId}/{fileName} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+                            && request.resource.size <= 50 * 1024 * 1024;
+    }
+    match /users/{uid}/chats/{chatId} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+                            && request.resource.size <= 50 * 1024 * 1024;
+    }
+
+    // Avatars — existing runtime path: avatars/{uid}/{file}
+    // From profile_remote_datasource.dart:67 (putFile + getDownloadURL).
+    // Current app stores downloadUrl in Firestore and displays via NetworkImage.
+    // Preserve: owner-only write, public read (avatars are profile images shown
+    // to other users). Limit to 10 MB for avatars.
+    match /avatars/{uid}/{fileName} {
+      allow read: if true;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+                            && request.resource.size <= 10 * 1024 * 1024;
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Default deny
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

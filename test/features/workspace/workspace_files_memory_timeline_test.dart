@@ -38,7 +38,7 @@ void main() {
       await controller.initialLoad;
 
       final target = controller.files.first;
-      controller.deleteFile(target);
+      await controller.deleteFile(target);
 
       expect(controller.files.any((f) => f.id == target.id), isFalse);
     });

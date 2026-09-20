@@ -34,6 +34,7 @@ import '../../features/sync/data/sync_service.dart';
 import '../../services/assistant_service.dart';
 import '../../services/secure_key_store.dart';
 import '../../services/storage_service.dart';
+import '../../features/workspace/data/services/file_storage_service.dart';
 import '../../features/workspace/data/repositories/workspace_repository.dart';
 
 final GetIt sl = GetIt.instance;
@@ -45,8 +46,9 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton<SecureKeyStore>(() => SecureKeyStore());
   sl.registerLazySingleton<StorageService>(() => StorageService());
   sl.registerLazySingleton<ConnectivityService>(() => ConnectivityService());
+  sl.registerLazySingleton<FileStorageService>(() => FileStorageService());
   sl.registerLazySingleton<AssistantService>(() => AssistantService(storage: sl<StorageService>()));
-  sl.registerLazySingleton<WorkspaceRepository>(() => FirestoreWorkspaceRepository());
+  sl.registerLazySingleton<WorkspaceRepository>(() => FirestoreWorkspaceRepository(fileStorageService: sl<FileStorageService>()));
 
   _initAuth();
   _initProfile();

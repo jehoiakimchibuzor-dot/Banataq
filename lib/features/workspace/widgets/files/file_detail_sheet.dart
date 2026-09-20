@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/design_system/design_system.dart';
+import '../../../../core/errors/app_result.dart';
 import '../../domain/models/workspace_file.dart';
 import '../../presentation/workspace_controller.dart';
 
@@ -84,6 +86,14 @@ class _FileDetailSheet extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
+                if (f.storagePath != null && f.storagePath!.isNotEmpty)
+                  AppButton(
+                    label: 'Open',
+                    icon: Icons.open_in_new_rounded,
+                    onPressed: () => _openFile(context, f),
+                    variant: AppButtonVariant.primary,
+                    height: 40,
+                  ),
                 AppButton(
                   label: f.favourite ? 'Unfavourite' : 'Favourite',
                   icon: f.favourite
@@ -126,8 +136,35 @@ class _FileDetailSheet extends StatelessWidget {
       destructive: true,
     );
     if (confirmed == true && context.mounted) {
-      controller.deleteFile(file);
-      Navigator.of(context).pop();
+      await controller.deleteFile(file);
+      if (context.mounted) Navigator.of(context).pop();
+    }
+  }
+
+  Future<void> _openFile(BuildContext context, WorkspaceFile f) async {
+    if (f.storagePath == null || f.storagePath!.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('File has no storage path — legacy placeholder')));
+      }
+      return;
+    }
+    final AppResult<String> result = await controller.openWorkspaceFile(f);
+    if (!context.mounted) return;
+    switch (result) {
+      case Success<String>(data: final url):
+        final Uri uri = Uri.parse(url);
+        try {
+          final bool launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+          if (!launched && context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not open file: $url')));
+          }
+        } catch (e) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Open failed: $e')));
+          }
+        }
+      case Failure<String>(error: final err):
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Open failed: ${err.message}')));
     }
   }
 }
