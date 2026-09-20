@@ -1,0 +1,25 @@
+# Release signing configuration — NEVER commit the real file.
+# Copy this to android/key.properties and fill with your release keystore values.
+# CI: inject via GitHub Secrets → create file at build time (see .github/workflows/ci.yaml).
+
+storeFile=C:/path/to/upload-keystore.jks
+storePassword=REPLACE_WITH_STORE_PASSWORD
+keyAlias=upload
+keyPassword=REPLACE_WITH_KEY_PASSWORD
+
+# How to create a new upload keystore (once):
+#   keytool -genkey -v -keystore upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+#
+# For Play App Signing, Google will re-sign with its own key; this upload key
+# is used only to sign the AAB you upload. The SHA-1/SHA-256 of this keystore
+# must be registered in Firebase Console → Project Settings → Android
+# (separate from debug SHA-1 03:D4:08:24:6B:F7:9D:0F:1B:6D:E0:57:9D:09:C9:70:68:D2:56:14).
+#
+# Local build (after creating key.properties):
+#   flutter build appbundle --release
+#
+# CI build (no local file):
+#   echo "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+#   printf "storeFile=upload-keystore.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n" \
+#     "$STORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > android/key.properties
+#   flutter build appbundle --release

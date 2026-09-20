@@ -9,7 +9,10 @@
     "test": "test"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "test:rules": "firebase emulators:exec --only firestore,storage \"npx mocha firestore.rules.test.js storage.rules.test.js --timeout 20000\"",
+    "test:firestore": "firebase emulators:exec --only firestore \"npx mocha firestore.rules.test.js --timeout 20000\"",
+    "test:storage": "firebase emulators:exec --only storage \"npx mocha storage.rules.test.js --timeout 20000\""
   },
   "repository": {
     "type": "git",
