@@ -1,6 +1,6 @@
 # Banataq Release Checklist — RC1 (1.0.0+2)
 
-**Current origin/main:** `2bec978` (+ 3F file storage). Worktree clean after PR #3F. Next RC is `1.0.0+2` (`versionName 1.0.0`, `versionCode 2`).
+**Current origin/main:** `b1be163` (chore: harden release pipeline). Worktree clean. Next RC is `1.0.0+2` (`versionName 1.0.0`, `versionCode 2`). Verified `pubspec.yaml:4` is `1.0.0+2`.
 
 > Do not mark a release as production-ready until every blocker is completed or explicitly acknowledged as unresolved.
 

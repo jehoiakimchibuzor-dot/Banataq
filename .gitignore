@@ -50,6 +50,7 @@ app.*.map.json
 # Build caches (not source — noisy, lock-prone)
 android/.kotlin/
 android/.gradle/
+android/build/
 android/app/.cxx/
 
 # Secrets / credentials — NEVER commit (Banataq: keys via --dart-define + SecureKeyStore)
